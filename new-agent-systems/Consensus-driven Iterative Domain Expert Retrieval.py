@@ -4,6 +4,8 @@ from openai import AzureOpenAI
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import utils
 from pymilvus import MilvusClient, DataType
+import os
+from dotenv import load_dotenv
 
 retrieval_client = MilvusClient(
     uri="http://localhost:19530"
@@ -11,7 +13,7 @@ retrieval_client = MilvusClient(
 
 llm_client = AzureOpenAI(
     azure_endpoint = "https://azure-openai-miblab-ncu.openai.azure.com/",
-    api_key = "9a8467bfe81d443d97b1af452662c33c",
+    api_key = os.getenv("azure_api_key"),
     api_version = "2024-08-01-preview",
 )
 
