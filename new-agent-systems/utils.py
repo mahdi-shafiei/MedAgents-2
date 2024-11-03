@@ -14,9 +14,9 @@ tokenizer_q = AutoTokenizer.from_pretrained("ncbi/MedCPT-Query-Encoder")
 model_c = AutoModelForSequenceClassification.from_pretrained("ncbi/MedCPT-Cross-Encoder").to(device)
 tokenizer_c = AutoTokenizer.from_pretrained("ncbi/MedCPT-Cross-Encoder")
 
-def retrieve(query, client, topk = 100):
+def retrieve(query, client,topk=100):
     search_res = client.search(
-    collection_name='medagents',
+    collection_name='rag2',
     data=[
         medcpt_query_embedding_function(query)
     ],  
