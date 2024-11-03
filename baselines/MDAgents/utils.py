@@ -5,11 +5,15 @@ from tqdm import tqdm
 from prettytable import PrettyTable 
 from termcolor import cprint
 from pptree import Node
-import google.generativeai as genai
+try:
+    import google.generativeai as genai
+except:
+    pass
 #from openai import OpenAI
 from openai import AzureOpenAI
 from pptree import *
 from dotenv import load_dotenv
+load_dotenv()
 
 class Agent:
     def __init__(self, instruction, role, examplers=None, model_info='gpt-4o-mini', img_path=None):
@@ -21,12 +25,11 @@ class Agent:
         if self.model_info == 'gemini-pro':
             self.model = genai.GenerativeModel('gemini-pro')
             self._chat = self.model.start_chat(history=[])
-        elif self.model_info in ['gpt-3.5', 'gpt-4', 'gpt-4o', 'gpt-4o-mini']:
-#            self.client = OpenAI(api_key='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')
-            self.client =AzureOpenAI(
-                azure_endpoint = "https://azure-openai-miblab-ncu.openai.azure.com/",
-                api_key = os.getenv("azure_api_key"),
-                api_version = "2024-08-01-preview",
+        elif self.model_info in ['gpt-4', 'gpt-4o', 'gpt-4o-mini']:
+            self.client = AzureOpenAI(
+                azure_endpoint = os.getenv("AZURE_ENDPOINT"),
+                api_key = os.getenv("AZURE_API_KEY"),
+                api_version = os.getenv("AZURE_API_VERSION"),
             )
             self.messages = [
                 {"role": "system", "content": instruction},
@@ -49,36 +52,28 @@ class Agent:
                     continue
             return "Error: Failed to get response from Gemini."
 
-        elif self.model_info in ['gpt-3.5', 'gpt-4', 'gpt-4o', 'gpt-4o-mini']:
+        elif self.model_info in ['gpt-4', 'gpt-4o', 'gpt-4o-mini']:
             self.messages.append({"role": "user", "content": message})
-#            if self.model_info == 'gpt-3.5':
-#                model_name = "gpt-3.5-turbo"
-#            else:
-#                model_name = "gpt-4o-mini"
-            model_name = "gpt-4o-mini"
             response = self.client.chat.completions.create(
-                model=model_name,
+                model=self.model_info,
                 messages=self.messages
             )
 
             self.messages.append({"role": "assistant", "content": response.choices[0].message.content})
             return response.choices[0].message.content
+        else:
+            raise ValueError(f"Unsupported model: {self.model_info}")
 
     def temp_responses(self, message, img_path=None):
-        if self.model_info in ['gpt-3.5', 'gpt-4', 'gpt-4o', 'gpt-4o-mini']:      
+        if self.model_info in ['gpt-4', 'gpt-4o', 'gpt-4o-mini']:      
             self.messages.append({"role": "user", "content": message})
             
             temperatures = [0.0]
             
             responses = {}
             for temperature in temperatures:
-#                if self.model_info == 'gpt-3.5':
-#                    model_info = 'gpt-3.5-turbo'
-#                else:
-#                    model_info = 'gpt-4o-mini'
-                model_info = "gpt-4o-mini"
                 response = self.client.chat.completions.create(
-                    model=model_info,
+                    model=self.model_info,
                     messages=self.messages,
                     temperature=temperature,
                 )
@@ -95,11 +90,11 @@ class Agent:
             return responses
 
 class Group:
-    def __init__(self, goal, members, question, examplers=None):
+    def __init__(self, goal, members, question, examplers=None, model='gpt-4o-mini'):
         self.goal = goal
         self.members = []
         for member_info in members:
-            _agent = Agent('You are a {} who {}.'.format(member_info['role'], member_info['expertise_description'].lower()), role=member_info['role'], model_info='gpt-4o-mini')
+            _agent = Agent('You are a {} who {}.'.format(member_info['role'], member_info['expertise_description'].lower()), role=member_info['role'], model_info=model)
             _agent.chat('You are a {} who {}.'.format(member_info['role'], member_info['expertise_description'].lower()))
             self.members.append(_agent)
         self.question = question
@@ -209,23 +204,29 @@ def parse_group_info(group_info):
 
 def setup_model(model_name):
     if 'gemini' in model_name:
-        genai.configure(api_key='sk-proj-lS3uBLHYRDIu7i5kNY9PT3BlbkFJ0ftw5CRsAdHRcIFyTS6M')
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
         return genai, None
     elif 'gpt' in model_name:
         client = AzureOpenAI(
-                azure_endpoint = "https://azure-openai-miblab-ncu.openai.azure.com/",
-                api_key = "9a8467bfe81d443d97b1af452662c33c",
-                api_version = "2024-08-01-preview",
+                azure_endpoint = os.getenv("AZURE_ENDPOINT"),
+                api_key = os.getenv("AZURE_API_KEY"),
+                api_version = os.getenv("AZURE_API_VERSION"),
             )
         return None, client
     else:
         raise ValueError(f"Unsupported model: {model_name}")
 
-def load_data(dataset):
+def load_data(dataset, split):
     test_qa = []
     examplers = []
+    if split == 'hard':
+        split_str = 'sampled_50_hard'
+    elif split == 'sampled':
+        split_str = 'sampled_50'
+    else:
+        split_str = split
 
-    test_path = f'data/{dataset}/sampled_50_hard_medqa.jsonl'
+    test_path = f'data/{dataset}/{split_str}.jsonl'
     with open(test_path, 'r') as file:
         for line in file:
             test_qa.append(json.loads(line))
@@ -248,13 +249,13 @@ def create_question(sample, dataset):
         return question, None
     return sample['question'], None
 
-def determine_difficulty(question, difficulty):
+def determine_difficulty(question, difficulty, model):
     if difficulty != 'adaptive':
         return difficulty
     
     difficulty_prompt = f"""Now, given the medical query as below, you need to decide the difficulty/complexity of it:\n{question}.\n\nPlease indicate the difficulty/complexity of the medical query among below options:\n1) basic: a single medical agent can output an answer.\n2) intermediate: number of medical experts with different expertise should dicuss and make final decision.\n3) advanced: multiple teams of clinicians from different departments need to collaborate with each other to make final decision."""
     
-    medical_agent = Agent(instruction='You are a medical expert who conducts initial assessment and your job is to decide the difficulty/complexity of the medical query.', role='medical expert', model_info='gpt-3.5')
+    medical_agent = Agent(instruction='You are a medical expert who conducts initial assessment and your job is to decide the difficulty/complexity of the medical query.', role='medical expert', model_info=model)
     medical_agent.chat('You are a medical expert who conducts initial assessment and your job is to decide the difficulty/complexity of the medical query.')
     response = medical_agent.chat(difficulty_prompt)
 
@@ -287,14 +288,21 @@ def process_basic_query(question, examplers, model, args):
     single_agent = Agent(instruction='You are a helpful assistant that answers multiple choice questions about medical knowledge.', role='medical expert', examplers=new_examplers, model_info=model)
     single_agent.chat('You are a helpful assistant that answers multiple choice questions about medical knowledge.')
     final_decision = single_agent.temp_responses(f'''The following are multiple choice questions (with answers) about medical knowledge. Let's think step by step.\n\n**Question:** {question}\nAnswer: ''', img_path=None)
-    
-    return final_decision
+
+    decision_agent = Agent(instruction='You are an answer parser.', role='Answer Parser', model_info=model)
+    decision_agent.chat('You are an answer parser.')
+    decision_answer = decision_agent.chat(f'The following are multiple choice questions (with answers) about medical knowledge.\n\nHere is the question: {question}\n\nOnly output A, B, C, or D from the following {final_decision}.', img_path=None)
+
+    return {
+        'majority': final_decision,
+        'answer': decision_answer
+    }
 
 def process_intermediate_query(question, examplers, model, args):
     cprint("[INFO] Step 1. Expert Recruitment", 'yellow', attrs=['blink'])
     recruit_prompt = f"""You are an experienced medical expert who recruits a group of experts with diverse identity and ask them to discuss and solve the given medical query."""
     
-    tmp_agent = Agent(instruction=recruit_prompt, role='recruiter', model_info='gpt-3.5')
+    tmp_agent = Agent(instruction=recruit_prompt, role='recruiter', model_info=model)
     tmp_agent.chat(recruit_prompt)
     
     num_agents = 5  # You can adjust this number as needed
@@ -462,10 +470,19 @@ def process_intermediate_query(question, examplers, model, args):
     _decision = moderator.temp_responses(f"Given each agent's final answer, please review each agent's opinion and make the final answer to the question by taking majority vote. Your answer should be like below format:\nAnswer: C) 2th pharyngeal arch\n{final_answer}\n\nQuestion: {question}", img_path=None)
     final_decision = {'majority': _decision}
 
-    print(f"{'\U0001F468\u200D\u2696\uFE0F'} moderator's final decision (by majority vote):", _decision)
+    emoji = '\U0001F468\u200D\u2696\uFE0F'
+    print(f"{emoji} moderator's final decision (by majority vote):", _decision)
     print()
 
-    return final_decision
+    # Parse the final decision
+    decision_agent = Agent(instruction='You are an answer parser.', role='Answer Parser', model_info=model)
+    decision_agent.chat('You are an answer parser.')
+    decision_answer = decision_agent.chat(f'The following are multiple choice questions (with answers) about medical knowledge.\n\nHere is the question: {question}\n\nOnly output A, B, C, or D from the following {final_decision}.', img_path=None)
+    
+    return {
+        'majority': final_decision,
+        'answer': decision_answer
+    }
 
 def process_advanced_query(question, model, args):
     print("[STEP 1] Recruitment")
@@ -473,7 +490,7 @@ def process_advanced_query(question, model, args):
 
     recruit_prompt = f"""You are an experienced medical expert. Given the complex medical query, you need to organize Multidisciplinary Teams (MDTs) and the members in MDT to make accurate and robust answer."""
 
-    tmp_agent = Agent(instruction=recruit_prompt, role='recruiter', model_info='gpt-4o-mini')
+    tmp_agent = Agent(instruction=recruit_prompt, role='recruiter', model_info=model)
     tmp_agent.chat(recruit_prompt)
 
     num_teams = 3  # You can adjust this number as needed
@@ -491,7 +508,7 @@ def process_advanced_query(question, model, args):
             print(f" Member {i2+1} ({member['role']}): {member['expertise_description']}")
         print()
         
-        group_instance = Group(res_gs['group_goal'], res_gs['members'], question)
+        group_instance = Group(res_gs['group_goal'], res_gs['members'], question, model=model)
         group_instances.append(group_instance)
 
     # STEP 2. initial assessment from each group
@@ -530,9 +547,17 @@ def process_advanced_query(question, model, args):
 
     # STEP 3. Final Decision
     decision_prompt = f"""You are an experienced medical expert. Now, given the investigations from multidisciplinary teams (MDT), please review them very carefully and return your final decision to the medical query."""
-    tmp_agent = Agent(instruction=decision_prompt, role='decision maker', model_info=model)
+    tmp_agent = Agent(instruction=decision_prompt, role='Decision Maker', model_info=model)
     tmp_agent.chat(decision_prompt)
 
     final_decision = tmp_agent.temp_responses(f"""Investigation:\n{initial_assessment_report}\n\nQuestion: {question}""", img_path=None)
 
-    return final_decision
+    # Parse the final decision
+    decision_agent = Agent(instruction='You are an answer parser.', role='Answer Parser', model_info=model)
+    decision_agent.chat('You are an answer parser.')
+    decision_answer = decision_agent.chat(f'The following are multiple choice questions (with answers) about medical knowledge.\n\nHere is the question: {question}\n\nOnly output A, B, C, or D from the following {final_decision}.', img_path=None)
+    
+    return {
+        'majority': final_decision,
+        'answer': decision_answer
+    }
