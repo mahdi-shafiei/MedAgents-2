@@ -27,13 +27,13 @@ def retrieve(query, client,topk=100):
     evidence_list = [result["entity"]["text"] for result in search_res[0][:topk]]
     return evidence_list
 
-def retrieve_filtered_sources(query, client, allowed_sources = ["source == 'statpearls'", "source == 'recop'", "source == 'textbooks'", "source == 'cpg'"], topk=100):
+def retrieve_filtered_sources(query, client, allowed_sources = ["source == 'PubMed'", "source == 'PMC'", "source == 'Textbook'", "source == 'CPG'", "source == 'statpearls'", "source == 'recop'", "source == 'textbooks'", "source == 'cpg'"], topk=100):
     evidence_list = []
+    query_embedding = medcpt_query_embedding_function(query)
     for source in allowed_sources:
         search_res = client.search(
-            collection_name='medagents',
-            data=[
-                medcpt_query_embedding_function(query)
+            collection_name='rag2',
+            data=[query_embedding               
             ],  
             limit=topk,  
             search_params={"metric_type": "IP", "params": {}},  
