@@ -55,42 +55,43 @@ if args.num_samples is not None:
     new_samples = new_samples[:min(args.num_samples, len(new_samples))]
 
 def process_sample(sample):
+    try:
+        question, _ = create_question(sample, args.dataset)
+        difficulty = determine_difficulty(question, args.difficulty, args.model)
 
-    question, _ = create_question(sample, args.dataset)
-    difficulty = determine_difficulty(question, args.difficulty, args.model)
+        print(f"difficulty: {difficulty}")
 
-    print(f"difficulty: {difficulty}")
+        if difficulty == 'basic':
+            final_decision = process_basic_query(question, examplers, args.model, args)
+        elif difficulty == 'intermediate':
+            final_decision = process_intermediate_query(question, examplers, args.model, args)
+        elif difficulty == 'advanced':
+            final_decision = process_advanced_query(question, args.model, args)
 
-    if difficulty == 'basic':
-        final_decision = process_basic_query(question, examplers, args.model, args)
-    elif difficulty == 'intermediate':
-        final_decision = process_intermediate_query(question, examplers, args.model, args)
-    elif difficulty == 'advanced':
-        final_decision = process_advanced_query(question, args.model, args)
+        return {
+            'idx': sample['realidx'],
+            'question': question,
+            'label': sample['answer_idx'],
+            'answer': sample['answer'],
+            'options': sample['options'],
+            'response': final_decision['majority'],
+            'prediction': final_decision['answer'],
+            'difficulty': difficulty
+        }
+    except Exception as e:
+        print(f"[ERROR] Processing sample {sample['realidx']} failed: {e}")
+        return None
 
-    return {
-        'idx': sample['realidx'],
-        'question': question,
-        'label': sample['answer_idx'],
-        'answer': sample['answer'],
-        'options': sample['options'],
-        'response': final_decision['majority'],
-        'prediction': final_decision['answer'],
-        'difficulty': difficulty
-    }
+if args.num_processes > 1:
+    with Pool(args.num_processes) as p:
+        for result in tqdm(p.imap(process_sample, new_samples), total=len(new_samples)):
+            if result is not None:
+                results.append(result)
+else:
+    for no, sample in enumerate(tqdm(new_samples)):
+        result = process_sample(sample)
+        if result is not None:
+            results.append(result)
 
-
-try:
-    if args.num_processes > 1:
-        with Pool(args.num_processes) as p:
-            results.extend(tqdm(p.imap(process_sample, new_samples), total=len(new_samples)))
-    else:
-        for no, sample in enumerate(tqdm(new_samples)):
-            results.append(process_sample(sample))
-
-except Exception as e:
-    print(f"[ERROR] {e}")
-
-finally:
-    with open(results_path, 'w') as file:
-        json.dump(results, file, indent=4)
+with open(results_path, 'w') as file:
+    json.dump(results, file, indent=4)
