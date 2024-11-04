@@ -51,6 +51,8 @@ if 'realidx' not in test_qa[0]:
 
 processed_idx = set([r['idx'] for r in results])
 new_samples = [s for s in test_qa if s['realidx'] not in processed_idx]
+if args.num_samples is not None:
+    new_samples = new_samples[:min(args.num_samples, len(new_samples))]
 
 def process_sample(sample):
 
@@ -81,9 +83,9 @@ def process_sample(sample):
 try:
     if args.num_processes > 1:
         with Pool(args.num_processes) as p:
-            results.extend(tqdm(p.imap(process_sample, test_qa[:args.num_samples]), total=args.num_samples))
+            results.extend(tqdm(p.imap(process_sample, new_samples), total=len(new_samples)))
     else:
-        for no, sample in enumerate(tqdm(test_qa[:args.num_samples])):
+        for no, sample in enumerate(tqdm(new_samples)):
             results.append(process_sample(sample))
 
 except Exception as e:

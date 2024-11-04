@@ -3,7 +3,7 @@
 #SBATCH --output=logs/medqa_experiments.log
 #SBATCH --error=logs/medqa_experiments.err
 #SBATCH --time=1-00:00:00
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=2
 #SBATCH --mem-per-cpu=4G
 #SBATCH --partition=scavenge
 
@@ -15,7 +15,7 @@ for model in gpt-4o-mini gpt-4o; do
             log_file=$logs_dir/${model}_medqa_${split}_${difficulty}.log
             error_file=$logs_dir/${model}_medqa_${split}_${difficulty}.err
             echo "Running $model on $split with difficulty $difficulty"
-            python main.py --dataset medqa --split $split --model $model --difficulty $difficulty --num_processes 8 > $log_file 2> $error_file
+            python main.py --dataset medqa --split $split --model $model --difficulty $difficulty --num_processes 2 > $log_file 2> $error_file
         done
     done
 done
