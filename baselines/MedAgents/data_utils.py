@@ -4,7 +4,7 @@ import re
 from nltk.tokenize import sent_tokenize
 from rouge_score import rouge_scorer
 
-class MyDataset:
+class QADataset:
     def __init__(self, args, traindata_obj=None):
         if hasattr(args, 'start_pos'):
             self.start_pos = args.start_pos

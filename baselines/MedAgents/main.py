@@ -1,10 +1,10 @@
-from data_utils import MyDataset
-from api_utils_azure import api_handler
 from string import punctuation
 import argparse
 import tqdm
 import json
 from utils import *
+from data_utils import QADataset
+from api_utils import api_handler
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 import os
@@ -54,7 +54,7 @@ if __name__ == '__main__':
         raise ValueError
 
     # get dataobj
-    dataobj = MyDataset(args, traindata_obj=None)
+    dataobj = QADataset(args, traindata_obj=None)
 
     # get existing output file
     existing_output_file = f"{args.output_files_folder}{args.model_name}-{args.dataset_name}-{args.split}-{args.method}.json"
