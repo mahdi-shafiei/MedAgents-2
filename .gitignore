@@ -4,10 +4,8 @@
 # Ignore all .json files
 *.json
 
-baselines/MedAgents/outputs/
-baselines/MedAgents/datasets/MedQA/
-baselines/MDAgents/output/
-baselines/MDAgents/logs/
+baselines/*/output/
+baselines/*/logs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/        

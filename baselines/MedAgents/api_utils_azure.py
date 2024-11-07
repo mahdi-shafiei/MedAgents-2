@@ -1,88 +1,75 @@
 import os
-import litellm
 import time
 import random
 from wrapt_timeout_decorator import timeout
 from openai import AzureOpenAI
+from dotenv import load_dotenv
 
-#openai.api_type = "open_ai"
-#openai.api_base = ""
-#openai.api_version = ""
-#openai.api_key = ""
-
-#os.environ['LITELLM_LOG'] = 'DEBUG'
-#litellm.set_verbose=True
-
+load_dotenv()
 
 # Initialize Azure OpenAI client with key-based authentication
 client = AzureOpenAI(
-    azure_endpoint = "https://azure-openai-miblab-ncu.openai.azure.com/",
-    api_key = "",
-    api_version = "2024-08-01-preview",
+    azure_endpoint = os.environ['AZURE_ENDPOINT'],
+    api_key = os.environ['AZURE_API_KEY'],
+    api_version = os.environ['AZURE_API_VERSION'],
 )
 
 
-#@timeout(200) # 200 seconds timeout
 def generate_response_multiagent(engine, temperature, frequency_penalty, presence_penalty, stop, system_role, user_input):
     print("Generating response for engine: ", engine)
     start_time = time.time()
     response = client.chat.completions.create(
-#    response = openai.ChatCompletion.create(
-#    response = litellm.completion(
-                    model=engine, # engine is the name of the deployment
-                    temperature=temperature,
-                    top_p=1, # 
-                    frequency_penalty=frequency_penalty,
-                    presence_penalty=presence_penalty,
-                    stop=stop,
-                    messages=[  
-                        {"role": "system", "content": system_role},
-                        {"role": "user", "content": user_input}
-                    ],
-                )
+        model=engine,
+        temperature=temperature,
+        top_p=1,
+        frequency_penalty=frequency_penalty,
+        presence_penalty=presence_penalty,
+        stop=stop,
+        messages=[  
+            {"role": "system", "content": system_role},
+            {"role": "user", "content": user_input}
+        ],
+    )
     end_time = time.time()
     print('Finish!')
     print("Time taken: ", end_time - start_time)
 
     return response
 
-#@timeout(10) # 10 seconds timeout
+
 def generate_response(engine, temperature, frequency_penalty, presence_penalty, stop, input_text):
     print("Generating response for engine: ", engine)
     start_time = time.time()
     response = client.chat.completions.create(
-#    response = litellm.completion(
-                    model=engine, # engine is the name of the deployment
-                    temperature=temperature,
-                    top_p=1, # top_p的意思是选择概率质量值之和达到top_p的概率分布采样结果
-                    frequency_penalty=frequency_penalty,
-                    presence_penalty=presence_penalty,
-                    stop=stop,
-                    messages=[{"role": "user", "content": input_text}],
-                )
+        model=engine,
+        temperature=temperature,
+        top_p=1,
+        frequency_penalty=frequency_penalty,
+        presence_penalty=presence_penalty,
+        stop=stop,
+        messages=[{"role": "user", "content": input_text}],
+    )
     end_time = time.time()
     print('Finish!')
     print("Time taken: ", end_time - start_time)
 
     return response
 
-#@timeout(20) # 20 seconds timeout
 def generate_response_ins(engine, temperature, frequency_penalty, presence_penalty, stop, input_text, suffix, echo):
     print("Generating response for engine: ", engine)
     start_time = time.time()
     response = client.chat.completions.create(
-#    response = litellm.completion(
-                        model=engine,
-                        prompt=input_text,
-                        temperature=temperature,
-                        top_p=1,
-                        suffix=suffix,
-                        frequency_penalty=frequency_penalty,
-                        presence_penalty=presence_penalty,
-                        stop=stop,
-                        echo=echo,
-                        logprobs=1,
-                    )
+        model=engine,
+        prompt=input_text,
+        temperature=temperature,
+        top_p=1,
+        suffix=suffix,
+        frequency_penalty=frequency_penalty,
+        presence_penalty=presence_penalty,
+        stop=stop,
+        echo=echo,
+        logprobs=1,
+    )
     end_time = time.time()
     print('Finish!')
     print("Time taken: ", end_time - start_time)
@@ -111,11 +98,11 @@ class api_handler:
             self.engine = 'code-davinci-edit-001'
         elif self.model == 'chatgpt':
             self.engine = 'gpt-35-turbo-16k'
-        elif self.model == 'gpt4':
+        elif self.model == 'gpt-4':
             self.engine = 'gpt-4'
-        elif self.model == 'gpt4omini':
+        elif self.model == 'gpt-4o-mini':
             self.engine = 'gpt-4o-mini'
-        elif self.model == 'gpt4o':
+        elif self.model == 'gpt-4o':
             self.engine = 'gpt-4o'
         elif self.model == 'llama3.1-70b':
             self.engine = 'meta-llama/Llama-3.1-70B-Instruct'
@@ -138,7 +125,6 @@ class api_handler:
                 else:
                     return "ERROR." 
             except Exception as error:
-#            except (TimeoutError, openai.error.Timeout, Exception) as error:
                 print(f'Attempt {attempt+1} of {max_attempts} failed with error: {error}')
                 if attempt == max_attempts - 1:
                     return "ERROR."
@@ -150,28 +136,24 @@ class api_handler:
         try:
             response = generate_response(self.engine, temperature, frequency_penalty, presence_penalty, stop, input_text)
         except Exception as error:
-#        except (TimeoutError, openai.error.Timeout, Exception):    
             print("Timeout")
             try:
                 response = generate_response(self.engine, temperature, frequency_penalty, presence_penalty, stop, input_text)
             except Exception as error:
-#            except (TimeoutError, openai.error.Timeout, Exception):
                 print("Timeout occurred again. Exiting.")
                 response = "ERROR."
-                return response  # 直接返回空字符串
+                return response
         if response.choices:
             x = response.choices[0].message.content
         else:
-            print(response)
-            x = "ERROR."  # 或者设置一个默认值 防止生成的response没有content造成问题
+            x = "ERROR."
             return x
 
-
-        if do_tunc: # do_tunc的意思是是否要截断 保证返回的值里没有换行符，Q:，Question:等
-            y = x.strip() # strip() 方法用于移除字符串头尾指定的字符（默认为空格或换行符）或字符序列。
+        if do_tunc:
+            y = x.strip()
             if '\n' in y:
-                pos = y.find('\n') # 这里的意思是找到第一个换行符的位置
-                y = y[:pos] # 这里的意思是把第一个换行符之前的内容保留
+                pos = y.find('\n')
+                y = y[:pos]
             if 'Q:' in y:
                 pos = y.find('Q:')
                 y = y[:pos]
@@ -185,7 +167,6 @@ class api_handler:
         if not return_prob:
             return x
 
-        # pdb.set_trace()
         output_token_offset_real, output_token_tokens_real, output_token_probs_real = [], [], []
         return x, (output_token_offset_real, output_token_tokens_real, output_token_probs_real)
 
@@ -199,12 +180,3 @@ class api_handler:
 (Pdb) output_token_probs_real
 [-0.7266144, -0.68505085, -0.044669915, -0.00023392851, -0.0021017971, -2.1768952e-05, -1.1430258e-06, -6.827632e-08, -3.01145e-05, -1.2231317e-05, -0.07086051, -2.7967804e-05, -6.6619094e-07, -0.41155097, -0.0020535963, -0.0021325003, -0.6671403, -0.51776046, -0.00014945272, -0.41470888, -3.076318e-07, -3.583558e-05, -2.9311614e-06, -3.869565e-05, -1.1430258e-06, -9.606849e-06, -0.017712338]
 """
-
-        # except Exception as e:
-        #     if 'You exceeded your current quota, please check your plan and billing details.' in str(e):
-        #         print("Exit because no quota")
-        #         exit()
-        #     time.sleep(2 * self.interval)
-        #     return self.get_output(input_text, max_tokens, temperature=temperature,
-        #            suffix=suffix, stop=stop, do_tunc=do_tunc, echo=echo, ban_pronoun=ban_pronoun,
-        #            frequency_penalty=frequency_penalty, presence_penalty=presence_penalty, return_prob=return_prob)

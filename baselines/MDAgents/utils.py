@@ -291,7 +291,7 @@ def process_basic_query(question, examplers, model, args):
 
     decision_agent = Agent(instruction='You are an answer parser.', role='Answer Parser', model_info=model)
     decision_agent.chat('You are an answer parser.')
-    decision_answer = decision_agent.chat(f'The following are multiple choice questions (with answers) about medical knowledge.\n\nHere is the question: {question}\n\nOnly output A, B, C, or D from the following {final_decision}.', img_path=None)
+    decision_answer = decision_agent.chat(f'The following are multiple choice questions (with answers) about medical knowledge.\n\nHere is the question: {question}\n\nOnly output A, B, C, D, or E from the following {final_decision}.', img_path=None)
 
     return {
         'majority': final_decision,
@@ -477,7 +477,7 @@ def process_intermediate_query(question, examplers, model, args):
     # Parse the final decision
     decision_agent = Agent(instruction='You are an answer parser.', role='Answer Parser', model_info=model)
     decision_agent.chat('You are an answer parser.')
-    decision_answer = decision_agent.chat(f'The following are multiple choice questions (with answers) about medical knowledge.\n\nHere is the question: {question}\n\nOnly output A, B, C, or D from the following {final_decision}.', img_path=None)
+    decision_answer = decision_agent.chat(f'The following are multiple choice questions (with answers) about medical knowledge.\n\nHere is the question: {question}\n\nOnly output A, B, C, D, or E from the following {final_decision}.', img_path=None)
     
     return {
         'majority': final_decision,
@@ -555,7 +555,7 @@ def process_advanced_query(question, model, args):
     # Parse the final decision
     decision_agent = Agent(instruction='You are an answer parser.', role='Answer Parser', model_info=model)
     decision_agent.chat('You are an answer parser.')
-    decision_answer = decision_agent.chat(f'The following are multiple choice questions (with answers) about medical knowledge.\n\nHere is the question: {question}\n\nOnly output A, B, C, or D from the following {final_decision}.', img_path=None)
+    decision_answer = decision_agent.chat(f'The following are multiple choice questions (with answers) about medical knowledge.\n\nHere is the question: {question}\n\nOnly output A, B, C, D, or E from the following {final_decision}.', img_path=None)
     
     return {
         'majority': final_decision,

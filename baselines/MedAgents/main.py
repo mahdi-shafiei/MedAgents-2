@@ -1,0 +1,100 @@
+from data_utils import MyDataset
+from api_utils_azure import api_handler
+from string import punctuation
+import argparse
+import tqdm
+import json
+from utils import *
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+def process_sample(idx, raw_sample, realqid, handler, args, dataobj):
+    question = raw_sample['question'] if raw_sample['question'][-1] in punctuation else raw_sample['question'] + '?'
+    if args.dataset_name.lower() in ['medqa', 'medmcqa'] or 'mmlu' in args.dataset_name.lower():
+        options = raw_sample['options']
+        gold_answer = raw_sample['answer_idx']
+        return fully_decode(idx, realqid, question, options, gold_answer, handler, args, dataobj)
+    elif args.dataset_name.lower() == 'pubmedqa':
+        question = raw_sample['context'] + ' ' + question
+        options = raw_sample['options']
+        gold_answer = raw_sample['answer_idx']
+        return fully_decode(idx, realqid, question, options, gold_answer, handler, args, dataobj)
+    elif args.dataset_name.lower() == 'medicationqa':
+        options = ''
+        gold_answer = raw_sample['answer_idx']
+        return fully_decode(idx, realqid, question, options, gold_answer, handler, args, dataobj)
+    else:
+        raise ValueError(f"Unsupported dataset: {args.dataset_name}")
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model_name', default='gpt-4o')
+    parser.add_argument('--dataset_name', default='medqa')
+    parser.add_argument('--dataset_dir', default='./data/medqa/')
+    parser.add_argument('--split', default='test')
+    parser.add_argument('--start_pos', type=int, default=0)
+    parser.add_argument('--end_pos', type=int, default=-1)
+    parser.add_argument('--output_files_folder', default='./output/')
+    parser.add_argument('--num_processes', type=int, default=4)
+    
+
+    parser.add_argument('--method', type=str, default='syn_verif', choices=['syn_verif', 'syn_only', 'anal_only', 'base_direct', 'base_cot'])
+    parser.add_argument('--max_attempt_vote', type=int, default=3)
+    args = parser.parse_args()
+    print(args)
+
+    # get handler
+    if args.model_name in ['gpt-4o', 'gpt-4o-mini']: # select the model
+        handler = api_handler(args.model_name)
+    else:
+        raise ValueError
+
+    # get dataobj
+    dataobj = MyDataset(args, traindata_obj=None)
+
+    # get existing output file
+    existing_output_file = f"{args.output_files_folder}{args.model_name}-{args.dataset_name}-{args.split}-{args.method}.json"
+    if os.path.exists(existing_output_file):
+        print(f"Existing output file found: {existing_output_file}")
+        with open(existing_output_file, 'r') as f:
+            results = json.load(f)
+        print(f"Loaded {len(results)} results from existing file.")
+    else:
+        results = []
+
+    # set test range
+    end_pos = len(dataobj) if args.end_pos == -1 else args.end_pos
+    test_range = range(args.start_pos, end_pos)  # closed interval
+    results_ids = [result['id'] for result in results]
+    test_range = [idx for idx in test_range if dataobj.get_by_idx(idx)['id'] not in results_ids]
+
+    # run multi-threading
+    with ThreadPoolExecutor(max_workers=args.num_processes) as executor:
+        futures = []
+        try:
+            # Submit tasks to the executor
+            for idx in tqdm.tqdm(test_range, desc=f"{args.start_pos} ~ {end_pos}"):
+                raw_sample = dataobj.get_by_idx(idx)
+                realqid = raw_sample['id']
+                # Submit each fully_decode task to the thread pool
+                futures.append(executor.submit(process_sample, idx, raw_sample, realqid, handler, args, dataobj))
+
+            for future in tqdm.tqdm(as_completed(futures), total=len(futures), desc="Collecting results"):
+                try:
+                    data_info = future.result()
+                    results.append(data_info)  # Store result with its index
+                except Exception as e:
+                    print(f"Error processing sample: {e}")
+
+        except KeyboardInterrupt:
+            print("KeyboardInterrupt: Exiting gracefully.")
+
+        finally:
+            results = sorted(results, key=lambda x: x['id'])
+            # Write results in the original order of id
+            with open(existing_output_file, 'w') as f:
+                json.dump(results, f, indent=4)

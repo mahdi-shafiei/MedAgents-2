@@ -1,19 +1,6 @@
-from prompt_generator_add import *
+from prompt_generator_add import ABMS_MAIN, ABMS_ALL, MEDICAL_SPECIALTIES_GPT_SELECTED, MEDICAL_FIELDS_THRESHOLD
 NUM_QD = 5
 NUM_OD = 2
-
-#medical_fields = medical_specialties_gpt_selected
-
-# question domains
-#def get_question_domains_prompt(question): #remove_longtail
-#    question_domain_format = "Medical Field: " + " | ".join(["Field" + str(i) for i in range(NUM_QD)])
-#    question_classifier = "You are a medical expert who specializes in categorizing a specific medical scenario into specific areas of medicine."
-#    prompt_get_question_domain = f"You need to complete the following steps: " \
-#                                 f"1. Carefully read the medical scenario presented in the question: '''{question}'''. \n" \
-#                                 f"2. Based on the medical scenario, classify the question into the following subfields of medicine: {', '.join(medical_fields)}. \n" \
-#                                 f"3. You should only output in exactly the same format as '''{question_domain_format}'''."
-#    
-#    return question_classifier, prompt_get_question_domain
 
 
 def get_question_domains_prompt(question):
@@ -34,17 +21,6 @@ def get_question_analysis_prompt(question, question_domain):
                         f"Subsequently, identify and highlight the aspects of the issue that you find most alarming or noteworthy."
 
     return question_analyzer, prompt_get_question_analysis
-
-
-#def get_options_domains_prompt(question, options): #_remove_longtail
-#    options_domain_format =  "Medical Field: " + " | ".join(["Field" + str(i) for i in range(NUM_OD)])
-#    options_classifier = "As a medical expert, you possess the ability to discern the two most relevant fields of expertise needed to address a multiple-choice question encapsulating a specific medical context."
-#    prompt_get_options_domain = f"You need to complete the following steps:" \
-#                                f"1. Carefully read the medical scenario presented in the question: '''{question}'''. \n" \
-#                                f"2. The available options are: '''{options}'''. Strive to understand the fundamental connections between the question and the options. \n" \
-#                                f"3. Your core aim should be to categorize the options into two distinct subfields of medicine from the following list: {', '.join(medical_fields)}. \n" \
-#                                f"4. You should only output in exactly the same format as '''{options_domain_format}'''."
-#    return options_classifier, prompt_get_options_domain
 
 
 def get_options_domains_prompt(question, options):
@@ -158,8 +134,6 @@ def get_consensus_opinion_prompt(domain, syn_report):
         f"You should output in exactly the same format as '''Revisions: [proposed revision advice] '''"
     return opinion_prompt
 
-
-#revision_prompt = get_revision_prompt(revision_advice)
 
 def get_revision_prompt(syn_report, revision_advice):
     revision_prompt = f"Here is the original report: {syn_report}\n\n"

@@ -1,12 +1,11 @@
 import os
-import jsonlines
+import json
 import re
 from nltk.tokenize import sent_tokenize
 from rouge_score import rouge_scorer
 
 class MyDataset:
-    def __init__(self, split, args, eval_only=False, traindata_obj=None):
-        #self.counter = 0
+    def __init__(self, args, traindata_obj=None):
         if hasattr(args, 'start_pos'):
             self.start_pos = args.start_pos
         if hasattr(args, 'end_pos'):
@@ -15,17 +14,17 @@ class MyDataset:
             self.model_name = args.model_name
         self.dataset_name = args.dataset_name
         self.dir_path = args.dataset_dir
-        self.split = split  # train / test
+        self.split = args.split  # train / test / sampled_50_5options / sampled_50_hard / sampled_50
         self.load() # load dataset -> load data in self.data
 
         # load answers -> self.choice_ref / self.ref
-        if args.dataset_name == 'MedQA':
+        if args.dataset_name.lower() == 'medqa':
             self.build_choice_ref_MedQA()
-        elif args.dataset_name == 'MedMCQA' or 'MMLU' in args.dataset_name:
+        elif args.dataset_name.lower() == 'medmcqa' or 'mmlu' in args.dataset_name.lower():
             self.build_choice_ref_MedMCQA()
-        elif args.dataset_name == 'PubMedQA':
+        elif args.dataset_name.lower() == 'pubmedqa':
             self.build_choice_ref_MedMCQA()
-        elif args.dataset_name == 'MedicationQA':
+        elif args.dataset_name.lower() == 'medicationqa':
             self.build_ref()
         
 
@@ -33,11 +32,14 @@ class MyDataset:
         filename = os.path.join(self.dir_path, self.split + '.jsonl')
         self.data = []
         with open(filename) as f:
-            for item in jsonlines.Reader(f):
+            for line in f:
+                item = json.loads(line)
                 self.data.append(item)
 
     def get_by_idx(self, idx):
-        return self.data[idx]
+        data = self.data[idx]
+        data['id'] = data['realidx'] if 'realidx' in data else idx
+        return data
 
     def __len__(self):
         return len(self.data)
@@ -66,7 +68,7 @@ class MyDataset:
                 'answers': {'text': item['answer'],
                 'choice': item['answer_idx']}, 
                 'options': item['options'], 
-                'id': i})
+                'id': item['realidx'] if 'realidx' in item else i})
 
     def compute_rougescore(self, preds):
         sum_score = 0.0
@@ -76,13 +78,10 @@ class MyDataset:
             # correct_answer = correct_answer.replace('\n', ' ')
             score = scorer.score(answer, correct_answer)
             sum_score += score['rouge1'].fmeasure
-            # print(f'id: {i}, answer: {answer}, correct answer: {correct_answer}, rouge1 score: {score["rouge1"].fmeasure}')
-            # print(score)
-            # break
         return sum_score / len(preds)
 
     def compute_accuracy(self, preds):
-        if 'PubMedQA' in self.dir_path:
+        if 'PubMedQA'.lower() in self.dir_path.lower():
             correct_num = 0.0
             all_num = 0.0
             for i, answer in enumerate(preds):
@@ -91,14 +90,12 @@ class MyDataset:
                 correct_answer = self.choice_ref[i]['answers']['text']
                 if answer == correct_choice or correct_answer in answer:
                     correct_num += 1
-                # print(f"id: {i}, choice: {answer}, correct choice: {correct_choice}")
             print(f"correct_num: {correct_num}, all_num: {all_num}")
             return correct_num / all_num
-        elif 'MedQA' in self.dir_path:
+        elif 'MedQA'.lower() in self.dir_path.lower():
             correct_num = {'step1': 0.0, 'step2&3': 0.0, 'all': 0.0}
             all_num = {'step1': 0.0, 'step2&3': 0.0, 'all': 0.0}
             for i, answer in enumerate(preds):
-                # choice = answer[:3]
                 answer = answer.strip()
                 all_num['all'] += 1
                 correct_choice = self.choice_ref[i]['answers']['choice']
@@ -108,20 +105,17 @@ class MyDataset:
                 if answer == correct_choice or (correct_choice in answer and answer != 'ERROR') or correct_answer in answer:
                     correct_num[type] += 1
                     correct_num['all'] += 1
-                # print(f"id: {i}, choice: {answer}, correct choice: {correct_choice}")
             print(f"correct_num: {correct_num}, all_num: {all_num}")
             return [correct_num[key] / all_num[key] for key in ['step1', 'step2&3', 'all']]
-        elif 'MedMCQA' in self.dir_path or 'MMLU' in self.dir_path:
+        elif 'MedMCQA'.lower() in self.dir_path.lower() or 'MMLU'.lower() in self.dir_path.lower():
             correct_num = 0.0
             all_num = 0.0
             for i, answer in enumerate(preds):
-                # choice = answer[:3]
                 all_num += 1
                 correct_choice = self.choice_ref[i]['answers']['choice']
                 correct_answer = self.choice_ref[i]['answers']['text']
                 if answer == correct_choice or correct_answer in answer:
                     correct_num += 1
-                # print(f"id: {i}, choice: {answer}, correct choice: {correct_choice}")
             print(f"correct_num: {correct_num}, all_num: {all_num}")
             return correct_num / all_num
 
@@ -172,13 +166,13 @@ def cleansing_syn_report(question, options, raw_synthesized_report):
 def cleansing_final_output(output):
     try:
         ans = output.split(":")[-1]
-        ans = re.findall(r'A|B|C|D', ans)
+        ans = re.findall(r'A|B|C|D|E', ans)
         if len(ans) == 0:
             ans = ""
         else:
             ans = ans[0]
     except:
-        ans = re.findall(r'A|B|C|D', ans)
+        ans = re.findall(r'A|B|C|D|E', ans)
         if len(ans) == 0:
             ans = ""
         else:
