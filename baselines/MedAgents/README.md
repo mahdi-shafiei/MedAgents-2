@@ -30,19 +30,32 @@ Please check our Google Drive: https://drive.google.com/file/d/11qNzDYIlimGGJ1fh
 
 
 ## Implementations
-Input your own openai api key in api_utils.py.
+Create a `.env` file with your OpenAI API key. Install the `dotenv` package:
 ```
-sh inference.sh
+pip install python-dotenv
+```
+
+The `.env` file should look like this:
+```
+AZURE_ENDPOINT=https://azure-openai-miblab-ncu.openai.azure.com/
+AZURE_API_KEY=<your_azure_api_key>
+AZURE_API_VERSION=2024-08-01-preview
+```
+
+Run the following command to run the experiments:
+```
+bash run_experiments_medqa.sh       # for MedQA
+bash run_experiments_mmlu.sh        # for MMLU (TODO)
 ```
 
 ## Cite Us
 If you find this project useful, please cite the following paper:
 
 ```
-@article{tang2023MedAgents,
-      title={ML-MedAgents: Large Language Models as Collaborators for Zero-shot Medical Reasoning}, 
+@article{tang2024medagents,
+      title={MedAgents: Large Language Models as Collaborators for Zero-shot Medical Reasoning}, 
       author={Xiangru Tang and Anni Zou and Zhuosheng Zhang and Yilun Zhao and Xingyao Zhang and Arman Cohan and Mark Gerstein},
-      year={2023},
+      year={2024},
       journal={arXiv preprint arXiv:2311.10537},
 }
 ```

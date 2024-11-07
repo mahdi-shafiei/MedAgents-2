@@ -34,13 +34,13 @@ Activate the environment:
 ~$ conda activate mdagents
 ```
 
-Set up API keys:
+Set up API keys by creating a `.env` file. Install the `dotenv` package with `pip install python-dotenv`. The `.env` file should look like this:
 ```bash
-~$ export openai_api_key="your_openai_api_key_here"
-~$ export genai_api_key="your_genai_api_key_here"
+AZURE_ENDPOINT=https://azure-openai-miblab-ncu.openai.azure.com/
+AZURE_API_KEY=<your_azure_api_key>
+AZURE_API_VERSION=2024-08-01-preview
 ```
 
-Replace your_openai_api_key_here and your_genai_api_key_here with your actual API keys.
 Prepare the data:
 
 ```bash
