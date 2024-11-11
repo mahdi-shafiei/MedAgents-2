@@ -38,7 +38,8 @@ class QADataset:
 
     def get_by_idx(self, idx):
         data = self.data[idx]
-        data['id'] = data['realidx'] if 'realidx' in data else idx
+        data['id'] = idx
+        data['realidx'] = data['realidx'] if 'realidx' in data else idx
         return data
 
     def __len__(self):

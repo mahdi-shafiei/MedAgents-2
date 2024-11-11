@@ -32,13 +32,14 @@ agent_emoji = ['\U0001F468\u200D\u2695\uFE0F', '\U0001F468\U0001F3FB\u200D\u2695
 random.shuffle(agent_emoji)
 
 path = os.path.join(os.getcwd(), 'output')
-if not os.path.exists(path):
-    os.makedirs(path)
+os.makedirs(path, exist_ok=True)
+subpath = os.path.join(path, args.dataset)
+os.makedirs(subpath, exist_ok=True)
 
 if args.num_samples is None:
     args.num_samples = len(test_qa)
 
-results_path = f'output/{args.model}_{args.dataset}_{args.split}_{args.difficulty}.json'
+results_path = os.path.join(subpath, f'{args.model}_{args.dataset}_{args.split}_{args.difficulty}.json')
 if os.path.exists(results_path):
     with open(results_path, 'r') as file:
         results = json.load(file)
@@ -51,6 +52,7 @@ if 'realidx' not in test_qa[0]:
 
 processed_idx = set([r['idx'] for r in results])
 new_samples = [s for s in test_qa if s['realidx'] not in processed_idx]
+print(len(new_samples))
 if args.num_samples is not None:
     new_samples = new_samples[:min(args.num_samples, len(new_samples))]
 

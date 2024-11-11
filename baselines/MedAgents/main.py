@@ -55,9 +55,12 @@ if __name__ == '__main__':
 
     # get dataobj
     dataobj = QADataset(args, traindata_obj=None)
+    os.makedirs(args.output_files_folder, exist_ok=True)
+    subfolder = os.path.join(args.output_files_folder, args.dataset_name)
+    os.makedirs(subfolder, exist_ok=True)
 
     # get existing output file
-    existing_output_file = f"{args.output_files_folder}{args.model_name}-{args.dataset_name}-{args.split}-{args.method}.json"
+    existing_output_file = os.path.join(subfolder, f"{args.model_name}-{args.dataset_name}-{args.split}-{args.method}.json")
     if os.path.exists(existing_output_file):
         print(f"Existing output file found: {existing_output_file}")
         with open(existing_output_file, 'r') as f:
@@ -70,7 +73,8 @@ if __name__ == '__main__':
     end_pos = len(dataobj) if args.end_pos == -1 else args.end_pos
     test_range = range(args.start_pos, end_pos)  # closed interval
     results_ids = [result['id'] for result in results]
-    test_range = [idx for idx in test_range if dataobj.get_by_idx(idx)['id'] not in results_ids]
+    results_realidx = [result.get('realidx', None) for result in results]
+    test_range = [idx for idx in test_range if dataobj.get_by_idx(idx)['id'] not in results_ids and dataobj.get_by_idx(idx)['realidx'] not in results_realidx]
 
     # run multi-threading
     with ThreadPoolExecutor(max_workers=args.num_processes) as executor:
@@ -86,6 +90,7 @@ if __name__ == '__main__':
             for future in tqdm.tqdm(as_completed(futures), total=len(futures), desc="Collecting results"):
                 try:
                     data_info = future.result()
+                    data_info['realidx'] = raw_sample['realidx']
                     results.append(data_info)  # Store result with its index
                 except Exception as e:
                     print(f"Error processing sample: {e}")
