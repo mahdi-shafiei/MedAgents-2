@@ -52,7 +52,6 @@ if 'realidx' not in test_qa[0]:
 
 processed_idx = set([r['idx'] for r in results])
 new_samples = [s for s in test_qa if s['realidx'] not in processed_idx]
-print(len(new_samples))
 if args.num_samples is not None:
     new_samples = new_samples[:min(args.num_samples, len(new_samples))]
 
@@ -84,16 +83,20 @@ def process_sample(sample):
         print(f"[ERROR] Processing sample {sample['realidx']} failed: {e}")
         return None
 
-if args.num_processes > 1:
-    with Pool(args.num_processes) as p:
-        for result in tqdm(p.imap(process_sample, new_samples), total=len(new_samples)):
+try:
+    if args.num_processes > 1:
+        with Pool(args.num_processes) as p:
+            for result in tqdm(p.imap(process_sample, new_samples), total=len(new_samples)):
+                if result is not None:
+                    results.append(result)
+    else:
+        for no, sample in enumerate(tqdm(new_samples)):
+            result = process_sample(sample)
             if result is not None:
                 results.append(result)
-else:
-    for no, sample in enumerate(tqdm(new_samples)):
-        result = process_sample(sample)
-        if result is not None:
-            results.append(result)
+except KeyboardInterrupt:
+    print(f"[ERROR] Processing samples interrupted by user")
 
-with open(results_path, 'w') as file:
-    json.dump(results, file, indent=4)
+finally:
+    with open(results_path, 'w') as file:
+        json.dump(results, file, indent=4)

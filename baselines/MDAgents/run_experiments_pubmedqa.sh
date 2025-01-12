@@ -12,7 +12,7 @@ mkdir -p $logs_dir
 mkdir -p $logs_dir/pubmedqa
 logs_dir=$logs_dir/pubmedqa
 
-for model in gpt-4o; do
+for model in gpt-4o-mini gpt-4o; do
     for split in sampled_50; do
         for difficulty in adaptive; do
             log_file=$logs_dir/${model}_pubmedqa_${split}_${difficulty}.log
