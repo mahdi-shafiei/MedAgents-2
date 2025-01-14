@@ -10,7 +10,7 @@
 logs_dir=logs
 
 for model in gpt-4o-mini gpt-4o; do
-    for split in sampled_50_hard sampled_50 sampled_50_5options; do
+    for split in sampled_50_hard sampled_50 sampled_50; do
         for difficulty in adaptive; do
             log_file=$logs_dir/${model}_medqa_${split}_${difficulty}.log
             error_file=$logs_dir/${model}_medqa_${split}_${difficulty}.err

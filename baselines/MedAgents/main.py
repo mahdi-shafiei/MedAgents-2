@@ -13,22 +13,10 @@ load_dotenv()
 
 def process_sample(idx, raw_sample, realqid, handler, args, dataobj):
     question = raw_sample['question'] if raw_sample['question'][-1] in punctuation else raw_sample['question'] + '?'
-    if args.dataset_name.lower() in ['medqa', 'medmcqa'] or 'mmlu' in args.dataset_name.lower():
+    if args.dataset_name.lower() in ['medqa', 'medmcqa', 'pubmedqa', 'afrimedqa'] or 'mmlu' in args.dataset_name.lower():
         options = raw_sample['options']
         gold_answer = raw_sample['answer_idx']
         return fully_decode(idx, realqid, question, options, gold_answer, handler, args, dataobj)
-    elif args.dataset_name.lower() == 'pubmedqa':
-        question = raw_sample['context'] + ' ' + question
-        options = raw_sample['options']
-        gold_answer = raw_sample['answer_idx']
-        return fully_decode(idx, realqid, question, options, gold_answer, handler, args, dataobj)
-    elif args.dataset_name.lower() == 'medicationqa':
-        options = ''
-        gold_answer = raw_sample['answer_idx']
-        return fully_decode(idx, realqid, question, options, gold_answer, handler, args, dataobj)
-    else:
-        raise ValueError(f"Unsupported dataset: {args.dataset_name}")
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

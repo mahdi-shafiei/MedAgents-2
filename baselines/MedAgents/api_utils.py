@@ -34,7 +34,7 @@ def generate_response_multiagent(engine, temperature, frequency_penalty, presenc
     print('Finish!')
     print("Time taken: ", end_time - start_time)
 
-    return response
+    return response, response.usage
 
 
 def generate_response(engine, temperature, frequency_penalty, presence_penalty, stop, input_text):
@@ -53,7 +53,7 @@ def generate_response(engine, temperature, frequency_penalty, presence_penalty, 
     print('Finish!')
     print("Time taken: ", end_time - start_time)
 
-    return response
+    return response, response.usage
 
 def generate_response_ins(engine, temperature, frequency_penalty, presence_penalty, stop, input_text, suffix, echo):
     print("Generating response for engine: ", engine)
@@ -74,7 +74,7 @@ def generate_response_ins(engine, temperature, frequency_penalty, presence_penal
     print('Finish!')
     print("Time taken: ", end_time - start_time)
 
-    return response
+    return response, response.usage
 
 class api_handler:
     def __init__(self, model):
@@ -119,35 +119,35 @@ class api_handler:
         max_attempts = 3
         for attempt in range(max_attempts):
             try:
-                response = generate_response_multiagent(self.engine, temperature, frequency_penalty, presence_penalty, stop, system_role, user_input)
+                response, usage = generate_response_multiagent(self.engine, temperature, frequency_penalty, presence_penalty, stop, system_role, user_input)
                 if response.choices:
-                    return response.choices[0].message.content
+                    return response.choices[0].message.content, usage
                 else:
-                    return "ERROR." 
+                    return "ERROR.", None
             except Exception as error:
                 print(f'Attempt {attempt+1} of {max_attempts} failed with error: {error}')
                 if attempt == max_attempts - 1:
-                    return "ERROR."
+                    return "ERROR.", None
 
 
     def get_output(self, input_text, max_tokens, temperature=0,
                    suffix=None, stop=None, do_tunc=False, echo=False, ban_pronoun=False,
                    frequency_penalty=0, presence_penalty=0, return_prob=False):
         try:
-            response = generate_response(self.engine, temperature, frequency_penalty, presence_penalty, stop, input_text)
+            response, usage = generate_response(self.engine, temperature, frequency_penalty, presence_penalty, stop, input_text)
         except Exception as error:
             print("Timeout")
             try:
-                response = generate_response(self.engine, temperature, frequency_penalty, presence_penalty, stop, input_text)
+                response, usage = generate_response(self.engine, temperature, frequency_penalty, presence_penalty, stop, input_text)
             except Exception as error:
                 print("Timeout occurred again. Exiting.")
                 response = "ERROR."
-                return response
+                return response, None
         if response.choices:
             x = response.choices[0].message.content
         else:
             x = "ERROR."
-            return x
+            return x, None
 
         if do_tunc:
             y = x.strip()
@@ -162,13 +162,13 @@ class api_handler:
                 y = y[:pos]
             assert not ('\n' in y)
             if not return_prob:
-                return y
+                return y, usage
 
         if not return_prob:
-            return x
+            return x, usage
 
         output_token_offset_real, output_token_tokens_real, output_token_probs_real = [], [], []
-        return x, (output_token_offset_real, output_token_tokens_real, output_token_probs_real)
+        return x, (output_token_offset_real, output_token_tokens_real, output_token_probs_real), usage
 
 """
 (Pdb) x
