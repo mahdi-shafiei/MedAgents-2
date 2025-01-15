@@ -48,9 +48,9 @@ class QADataset:
         for i in range(len(self)):
             item = self.get_by_idx(i)
             self.choice_ref.append({
-                'answers': {'text': item['answer'],'choice': item['answer_idx']}, 
+                'answers': {'text': item['options'][item['answer_idx']],'choice': item['answer_idx']}, 
                 'options': item['options'], 
-                'type': item['meta_info'],
+                'type': item.get('meta_info', ''),
                 'id': i})
 
     def build_choice_ref_MedMCQA(self):
