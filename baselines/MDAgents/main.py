@@ -60,43 +60,43 @@ if args.num_samples is not None:
 def process_sample(sample):
     time_start = time.time()
     total_usage = {'prompt_tokens': 0, 'completion_tokens': 0}
-    # try:
-    question, _ = create_question(sample, args.dataset)
-    difficulty, difficulty_usage = determine_difficulty(question, args.difficulty, args.model)
-    total_usage['prompt_tokens'] += difficulty_usage['prompt_tokens']
-    total_usage['completion_tokens'] += difficulty_usage['completion_tokens']
+    try:
+        question, _ = create_question(sample, args.dataset)
+        difficulty, difficulty_usage = determine_difficulty(question, args.difficulty, args.model)
+        total_usage['prompt_tokens'] += difficulty_usage['prompt_tokens']
+        total_usage['completion_tokens'] += difficulty_usage['completion_tokens']
 
-    print(f"difficulty: {difficulty}")
+        print(f"difficulty: {difficulty}")
 
-    if difficulty == 'basic':
-        final_decision, final_decision_usage = process_basic_query(question, examplers, args.model, args)
-        total_usage['prompt_tokens'] += final_decision_usage['prompt_tokens']
-        total_usage['completion_tokens'] += final_decision_usage['completion_tokens']
-    elif difficulty == 'intermediate':
-        final_decision, final_decision_usage = process_intermediate_query(question, examplers, args.model, args)
-        total_usage['prompt_tokens'] += final_decision_usage['prompt_tokens']
-        total_usage['completion_tokens'] += final_decision_usage['completion_tokens']
-    elif difficulty == 'advanced':
-        final_decision, final_decision_usage = process_advanced_query(question, args.model, args)
-        total_usage['prompt_tokens'] += final_decision_usage['prompt_tokens']
-        total_usage['completion_tokens'] += final_decision_usage['completion_tokens']
+        if difficulty == 'basic':
+            final_decision, final_decision_usage = process_basic_query(question, examplers, args.model, args)
+            total_usage['prompt_tokens'] += final_decision_usage['prompt_tokens']
+            total_usage['completion_tokens'] += final_decision_usage['completion_tokens']
+        elif difficulty == 'intermediate':
+            final_decision, final_decision_usage = process_intermediate_query(question, examplers, args.model, args)
+            total_usage['prompt_tokens'] += final_decision_usage['prompt_tokens']
+            total_usage['completion_tokens'] += final_decision_usage['completion_tokens']
+        elif difficulty == 'advanced':
+            final_decision, final_decision_usage = process_advanced_query(question, args.model, args)
+            total_usage['prompt_tokens'] += final_decision_usage['prompt_tokens']
+            total_usage['completion_tokens'] += final_decision_usage['completion_tokens']
 
-    time_end = time.time()
-    return {
-        'idx': sample['realidx'],
-        'question': question,
-        'label': sample['answer_idx'],
-        'answer': sample['answer'],
-        'options': sample['options'],
-        'response': final_decision['majority'],
-        'prediction': final_decision['answer'],
-        'difficulty': difficulty,
-        'total_usage': total_usage,
-        'total_time': time_end - time_start
-    }
-    # except Exception as e:
-    #     print(f"[ERROR] Processing sample {sample['realidx']} failed: {e}")
-    #     return None
+        time_end = time.time()
+        return {
+            'idx': sample['realidx'],
+            'question': question,
+            'label': sample['answer_idx'],
+            'answer': sample['answer'],
+            'options': sample['options'],
+            'response': final_decision['majority'],
+            'prediction': final_decision['answer'],
+            'difficulty': difficulty,
+            'total_usage': total_usage,
+            'total_time': time_end - time_start
+        }
+    except Exception as e:
+        print(f"[ERROR] Processing sample {sample['realidx']} failed: {e}")
+        return None
 
 try:
     if args.num_processes > 1:
