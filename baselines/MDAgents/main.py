@@ -12,12 +12,14 @@ from utils import (
     load_data, create_question, determine_difficulty,
     process_basic_query, process_intermediate_query, process_advanced_query
 )
+import time
 
 from dotenv import load_dotenv
 load_dotenv()
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str, default='medqa')
+parser.add_argument('--dataset_dir', type=str, default='../../data/medqa')
 parser.add_argument('--split', type=str, default='test')
 parser.add_argument('--model', type=str, default='gpt-4o-mini')
 parser.add_argument('--difficulty', type=str, default='adaptive')
@@ -26,7 +28,7 @@ parser.add_argument('--num_processes', type=int, default=1)
 args = parser.parse_args()
 
 model, client = setup_model(args.model)
-test_qa, examplers = load_data(args.dataset, args.split)
+test_qa, examplers = load_data(args.dataset_dir, args.split)
 
 agent_emoji = ['\U0001F468\u200D\u2695\uFE0F', '\U0001F468\U0001F3FB\u200D\u2695\uFE0F', '\U0001F469\U0001F3FC\u200D\u2695\uFE0F', '\U0001F469\U0001F3FB\u200D\u2695\uFE0F', '\U0001f9d1\u200D\u2695\uFE0F', '\U0001f9d1\U0001f3ff\u200D\u2695\uFE0F', '\U0001f468\U0001f3ff\u200D\u2695\uFE0F', '\U0001f468\U0001f3fd\u200D\u2695\uFE0F', '\U0001f9d1\U0001f3fd\u200D\u2695\uFE0F', '\U0001F468\U0001F3FD\u200D\u2695\uFE0F']
 random.shuffle(agent_emoji)
@@ -56,32 +58,45 @@ if args.num_samples is not None:
     new_samples = new_samples[:min(args.num_samples, len(new_samples))]
 
 def process_sample(sample):
-    try:
-        question, _ = create_question(sample, args.dataset)
-        difficulty = determine_difficulty(question, args.difficulty, args.model)
+    time_start = time.time()
+    total_usage = {'prompt_tokens': 0, 'completion_tokens': 0}
+    # try:
+    question, _ = create_question(sample, args.dataset)
+    difficulty, difficulty_usage = determine_difficulty(question, args.difficulty, args.model)
+    total_usage['prompt_tokens'] += difficulty_usage['prompt_tokens']
+    total_usage['completion_tokens'] += difficulty_usage['completion_tokens']
 
-        print(f"difficulty: {difficulty}")
+    print(f"difficulty: {difficulty}")
 
-        if difficulty == 'basic':
-            final_decision = process_basic_query(question, examplers, args.model, args)
-        elif difficulty == 'intermediate':
-            final_decision = process_intermediate_query(question, examplers, args.model, args)
-        elif difficulty == 'advanced':
-            final_decision = process_advanced_query(question, args.model, args)
+    if difficulty == 'basic':
+        final_decision, final_decision_usage = process_basic_query(question, examplers, args.model, args)
+        total_usage['prompt_tokens'] += final_decision_usage['prompt_tokens']
+        total_usage['completion_tokens'] += final_decision_usage['completion_tokens']
+    elif difficulty == 'intermediate':
+        final_decision, final_decision_usage = process_intermediate_query(question, examplers, args.model, args)
+        total_usage['prompt_tokens'] += final_decision_usage['prompt_tokens']
+        total_usage['completion_tokens'] += final_decision_usage['completion_tokens']
+    elif difficulty == 'advanced':
+        final_decision, final_decision_usage = process_advanced_query(question, args.model, args)
+        total_usage['prompt_tokens'] += final_decision_usage['prompt_tokens']
+        total_usage['completion_tokens'] += final_decision_usage['completion_tokens']
 
-        return {
-            'idx': sample['realidx'],
-            'question': question,
-            'label': sample['answer_idx'],
-            'answer': sample['answer'],
-            'options': sample['options'],
-            'response': final_decision['majority'],
-            'prediction': final_decision['answer'],
-            'difficulty': difficulty
-        }
-    except Exception as e:
-        print(f"[ERROR] Processing sample {sample['realidx']} failed: {e}")
-        return None
+    time_end = time.time()
+    return {
+        'idx': sample['realidx'],
+        'question': question,
+        'label': sample['answer_idx'],
+        'answer': sample['answer'],
+        'options': sample['options'],
+        'response': final_decision['majority'],
+        'prediction': final_decision['answer'],
+        'difficulty': difficulty,
+        'total_usage': total_usage,
+        'total_time': time_end - time_start
+    }
+    # except Exception as e:
+    #     print(f"[ERROR] Processing sample {sample['realidx']} failed: {e}")
+    #     return None
 
 try:
     if args.num_processes > 1:

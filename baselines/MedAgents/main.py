@@ -13,7 +13,7 @@ load_dotenv()
 
 def process_sample(idx, raw_sample, realqid, handler, args, dataobj):
     question = raw_sample['question'] if raw_sample['question'][-1] in punctuation else raw_sample['question'] + '?'
-    if args.dataset_name.lower() in ['medqa', 'medmcqa', 'pubmedqa', 'afrimedqa'] or 'mmlu' in args.dataset_name.lower():
+    if args.dataset_name.lower() in ['medqa', 'medmcqa', 'pubmedqa', 'afrimedqa', 'medbullets', 'mmlu-pro', 'mmlu'] or 'mmlu' in args.dataset_name.lower():
         options = raw_sample['options']
         gold_answer = raw_sample['answer_idx']
         return fully_decode(idx, realqid, question, options, gold_answer, handler, args, dataobj)
@@ -33,7 +33,6 @@ if __name__ == '__main__':
     parser.add_argument('--method', type=str, default='syn_verif', choices=['syn_verif', 'syn_only', 'anal_only', 'base_direct', 'base_cot'])
     parser.add_argument('--max_attempt_vote', type=int, default=3)
     args = parser.parse_args()
-    print(args)
 
     # get handler
     if args.model_name in ['gpt-4o', 'gpt-4o-mini']: # select the model

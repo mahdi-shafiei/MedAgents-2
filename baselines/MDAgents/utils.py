@@ -60,7 +60,7 @@ class Agent:
             )
 
             self.messages.append({"role": "assistant", "content": response.choices[0].message.content})
-            return response.choices[0].message.content
+            return response.choices[0].message.content, {'prompt_tokens': response.usage.prompt_tokens, 'completion_tokens': response.usage.completion_tokens}
         else:
             raise ValueError(f"Unsupported model: {self.model_info}")
 
@@ -80,14 +80,14 @@ class Agent:
                 
                 responses[temperature] = response.choices[0].message.content
                 
-            return responses
+            return responses, {'prompt_tokens': response.usage.prompt_tokens, 'completion_tokens': response.usage.completion_tokens}
         
         elif self.model_info == 'gemini-pro':
             response = self._chat.send_message(message, stream=True)
             responses = ""
             for chunk in response:
                 responses += chunk.text + "\n"
-            return responses
+            return responses, {'prompt_tokens': 0, 'completion_tokens': 0}
 
 class Group:
     def __init__(self, goal, members, question, examplers=None, model='gpt-4o-mini'):
@@ -101,6 +101,7 @@ class Group:
         self.examplers = examplers
 
     def interact(self, comm_type, message=None, img_path=None):
+        total_usage = {'prompt_tokens': 0, 'completion_tokens': 0}
         if comm_type == 'internal':
             lead_member = None
             assist_members = []
@@ -121,14 +122,19 @@ class Group:
             
             delivery_prompt += "\n\nNow, given the medical query, provide a short answer to what kind investigations are needed from each assistant clinicians.\nQuestion: {}".format(self.question)
             try:
-                delivery = lead_member.chat(delivery_prompt)
+                delivery, delivery_usage = lead_member.chat(delivery_prompt)
             except:
-                delivery = assist_members[0].chat(delivery_prompt)
+                delivery, delivery_usage = assist_members[0].chat(delivery_prompt)
+
+            total_usage['prompt_tokens'] += delivery_usage['prompt_tokens']
+            total_usage['completion_tokens'] += delivery_usage['completion_tokens']
 
             investigations = []
             for a_mem in assist_members:
-                investigation = a_mem.chat("You are in a medical group where the goal is to {}. Your group lead is asking for the following investigations:\n{}\n\nPlease remind your expertise and return your investigation summary that contains the core information.".format(self.goal, delivery))
+                investigation, investigation_usage = a_mem.chat("You are in a medical group where the goal is to {}. Your group lead is asking for the following investigations:\n{}\n\nPlease remind your expertise and return your investigation summary that contains the core information.".format(self.goal, delivery))
                 investigations.append([a_mem.role, investigation])
+                total_usage['prompt_tokens'] += investigation_usage['prompt_tokens']
+                total_usage['completion_tokens'] += investigation_usage['completion_tokens']
             
             gathered_investigation = ""
             for investigation in investigations:
@@ -139,9 +145,11 @@ class Group:
             else:
                 investigation_prompt = f"""The gathered investigation from your asssitant clinicians is as follows:\n{gathered_investigation}.\n\nNow, return your answer to the medical query among the option provided.\n\nQuestion: {self.question}"""
 
-            response = lead_member.chat(investigation_prompt)
+            response, response_usage = lead_member.chat(investigation_prompt)
+            total_usage['prompt_tokens'] += response_usage['prompt_tokens']
+            total_usage['completion_tokens'] += response_usage['completion_tokens']
 
-            return response
+            return response, response_usage
 
         elif comm_type == 'external':
             return
@@ -216,22 +224,16 @@ def setup_model(model_name):
     else:
         raise ValueError(f"Unsupported model: {model_name}")
 
-def load_data(dataset, split):
+def load_data(dataset_dir, split):
     test_qa = []
     examplers = []
-    if split == 'hard':
-        split_str = 'sampled_50_hard'
-    elif split == 'sampled':
-        split_str = 'sampled_50'
-    else:
-        split_str = split
 
-    test_path = f'data/{dataset}/{split_str}.jsonl'
+    test_path = f'{dataset_dir}/{split}.jsonl'
     with open(test_path, 'r') as file:
         for line in file:
             test_qa.append(json.loads(line))
 
-    train_path = f'data/{dataset}/train.jsonl'
+    train_path = f'{dataset_dir}/train.jsonl'
     with open(train_path, 'r') as file:
         for line in file:
             examplers.append(json.loads(line))
@@ -251,24 +253,25 @@ def create_question(sample, dataset):
 
 def determine_difficulty(question, difficulty, model):
     if difficulty != 'adaptive':
-        return difficulty
+        return difficulty, {'prompt_tokens': 0, 'completion_tokens': 0}
     
     difficulty_prompt = f"""Now, given the medical query as below, you need to decide the difficulty/complexity of it:\n{question}.\n\nPlease indicate the difficulty/complexity of the medical query among below options:\n1) basic: a single medical agent can output an answer.\n2) intermediate: number of medical experts with different expertise should dicuss and make final decision.\n3) advanced: multiple teams of clinicians from different departments need to collaborate with each other to make final decision."""
     
     medical_agent = Agent(instruction='You are a medical expert who conducts initial assessment and your job is to decide the difficulty/complexity of the medical query.', role='medical expert', model_info=model)
     medical_agent.chat('You are a medical expert who conducts initial assessment and your job is to decide the difficulty/complexity of the medical query.')
-    response = medical_agent.chat(difficulty_prompt)
+    response, response_usage = medical_agent.chat(difficulty_prompt)
 
     if 'basic' in response.lower() or '1)' in response.lower():
-        return 'basic'
+        return 'basic', response_usage
     elif 'intermediate' in response.lower() or '2)' in response.lower():
-        return 'intermediate'
+        return 'intermediate', response_usage
     elif 'advanced' in response.lower() or '3)' in response.lower():
-        return 'advanced'
+        return 'advanced', response_usage
 
 def process_basic_query(question, examplers, model, args):
     medical_agent = Agent(instruction='You are a helpful medical agent.', role='medical expert', model_info=model)
     new_examplers = []
+    total_usage = {'prompt_tokens': 0, 'completion_tokens': 0}
     if args.dataset == 'medqa':
         random.shuffle(examplers)
         for ie, exampler in enumerate(examplers[:5]):
@@ -278,35 +281,46 @@ def process_basic_query(question, examplers, model, args):
             random.shuffle(choices)
             exampler_question += " " + ' '.join(choices)
             exampler_answer = f"Answer: ({exampler['answer_idx']}) {exampler['answer']}\n\n"
-            exampler_reason = medical_agent.chat(f"You are a helpful medical agent. Below is an example of medical knowledge question and answer. After reviewing the below medical question and answering, can you provide 1-2 sentences of reason that support the answer as you didn't know the answer ahead?\n\nQuestion: {exampler_question}\n\nAnswer: {exampler_answer}")
+            exampler_reason, exampler_reason_usage = medical_agent.chat(f"You are a helpful medical agent. Below is an example of medical knowledge question and answer. After reviewing the below medical question and answering, can you provide 1-2 sentences of reason that support the answer as you didn't know the answer ahead?\n\nQuestion: {exampler_question}\n\nAnswer: {exampler_answer}")
 
+            total_usage['prompt_tokens'] += exampler_reason_usage['prompt_tokens']
+            total_usage['completion_tokens'] += exampler_reason_usage['completion_tokens']
             tmp_exampler['question'] = exampler_question
             tmp_exampler['reason'] = exampler_reason
             tmp_exampler['answer'] = exampler_answer
             new_examplers.append(tmp_exampler)
-    
+
     single_agent = Agent(instruction='You are a helpful assistant that answers multiple choice questions about medical knowledge.', role='medical expert', examplers=new_examplers, model_info=model)
     single_agent.chat('You are a helpful assistant that answers multiple choice questions about medical knowledge.')
-    final_decision = single_agent.temp_responses(f'''The following are multiple choice questions (with answers) about medical knowledge. Let's think step by step.\n\n**Question:** {question}\nAnswer: ''', img_path=None)
+    final_decision, final_decision_usage = single_agent.temp_responses(f'''The following are multiple choice questions (with answers) about medical knowledge. Let's think step by step.\n\n**Question:** {question}\nAnswer: ''', img_path=None)
+
+    total_usage['prompt_tokens'] += final_decision_usage['prompt_tokens']
+    total_usage['completion_tokens'] += final_decision_usage['completion_tokens']
 
     decision_agent = Agent(instruction='You are an answer parser.', role='Answer Parser', model_info=model)
     decision_agent.chat('You are an answer parser.')
-    decision_answer = decision_agent.chat(f'The following are multiple choice questions (with answers) about medical knowledge.\n\nHere is the question: {question}\n\nOnly output A, B, C, D, or E from the following {final_decision}.', img_path=None)
+    decision_answer, decision_answer_usage = decision_agent.chat(f'The following are multiple choice questions (with answers) about medical knowledge.\n\nHere is the question: {question}\n\nOnly output A, B, C, D, or E from the following {final_decision}.', img_path=None)
+
+    total_usage['prompt_tokens'] += decision_answer_usage['prompt_tokens']
+    total_usage['completion_tokens'] += decision_answer_usage['completion_tokens']
 
     return {
         'majority': final_decision,
         'answer': decision_answer
-    }
+    }, total_usage
 
 def process_intermediate_query(question, examplers, model, args):
     cprint("[INFO] Step 1. Expert Recruitment", 'yellow', attrs=['blink'])
     recruit_prompt = f"""You are an experienced medical expert who recruits a group of experts with diverse identity and ask them to discuss and solve the given medical query."""
-    
+    total_usage = {'prompt_tokens': 0, 'completion_tokens': 0}
+
     tmp_agent = Agent(instruction=recruit_prompt, role='recruiter', model_info=model)
     tmp_agent.chat(recruit_prompt)
     
     num_agents = 5  # You can adjust this number as needed
-    recruited = tmp_agent.chat(f"Question: {question}\nYou can recruit {num_agents} experts in different medical expertise. Considering the medical question and the options for the answer, what kind of experts will you recruit to better make an accurate answer?\nAlso, you need to specify the communication structure between experts (e.g., Pulmonologist == Neonatologist == Medical Geneticist == Pediatrician > Cardiologist), or indicate if they are independent.\n\nFor example, if you want to recruit five experts, you answer can be like:\n1. Pediatrician - Specializes in the medical care of infants, children, and adolescents. - Hierarchy: Independent\n2. Cardiologist - Focuses on the diagnosis and treatment of heart and blood vessel-related conditions. - Hierarchy: Pediatrician > Cardiologist\n3. Pulmonologist - Specializes in the diagnosis and treatment of respiratory system disorders. - Hierarchy: Independent\n4. Neonatologist - Focuses on the care of newborn infants, especially those who are born prematurely or have medical issues at birth. - Hierarchy: Independent\n5. Medical Geneticist - Specializes in the study of genes and heredity. - Hierarchy: Independent\n\nPlease answer in above format, and do not include your reason.")
+    recruited, recruited_usage = tmp_agent.chat(f"Question: {question}\nYou can recruit {num_agents} experts in different medical expertise. Considering the medical question and the options for the answer, what kind of experts will you recruit to better make an accurate answer?\nAlso, you need to specify the communication structure between experts (e.g., Pulmonologist == Neonatologist == Medical Geneticist == Pediatrician > Cardiologist), or indicate if they are independent.\n\nFor example, if you want to recruit five experts, you answer can be like:\n1. Pediatrician - Specializes in the medical care of infants, children, and adolescents. - Hierarchy: Independent\n2. Cardiologist - Focuses on the diagnosis and treatment of heart and blood vessel-related conditions. - Hierarchy: Pediatrician > Cardiologist\n3. Pulmonologist - Specializes in the diagnosis and treatment of respiratory system disorders. - Hierarchy: Independent\n4. Neonatologist - Focuses on the care of newborn infants, especially those who are born prematurely or have medical issues at birth. - Hierarchy: Independent\n5. Medical Geneticist - Specializes in the study of genes and heredity. - Hierarchy: Independent\n\nPlease answer in above format, and do not include your reason.")
+    total_usage['prompt_tokens'] += recruited_usage['prompt_tokens']
+    total_usage['completion_tokens'] += recruited_usage['completion_tokens']
 
     agents_info = [agent_info.split(" - Hierarchy: ") for agent_info in recruited.split('\n') if agent_info]
     agents_data = [(info[0], info[1]) if len(info) > 1 else (info[0], None) for info in agents_info]
@@ -354,7 +368,9 @@ def process_intermediate_query(question, examplers, model, args):
             random.shuffle(options)
             exampler_question += " " + " ".join(options)
             exampler_answer = f"Answer: ({exampler['answer_idx']}) {exampler['answer']}"
-            exampler_reason = tmp_agent.chat(f"Below is an example of medical knowledge question and answer. After reviewing the below medical question and answering, can you provide 1-2 sentences of reason that support the answer as you didn't know the answer ahead?\n\nQuestion: {exampler_question}\n\nAnswer: {exampler_answer}")
+            exampler_reason, exampler_reason_usage = tmp_agent.chat(f"Below is an example of medical knowledge question and answer. After reviewing the below medical question and answering, can you provide 1-2 sentences of reason that support the answer as you didn't know the answer ahead?\n\nQuestion: {exampler_question}\n\nAnswer: {exampler_answer}")
+            total_usage['prompt_tokens'] += exampler_reason_usage['prompt_tokens']
+            total_usage['completion_tokens'] += exampler_reason_usage['completion_tokens']
             
             exampler_question += f"\n{exampler_answer}\n{exampler_reason}\n\n"
             fewshot_examplers += exampler_question
@@ -377,7 +393,9 @@ def process_intermediate_query(question, examplers, model, args):
     round_answers = {n: None for n in range(1, num_rounds+1)}
     initial_report = ""
     for k, v in agent_dict.items():
-        opinion = v.chat(f'''Given the examplers, please return your answer to the medical query among the option provided.\n\n{fewshot_examplers}\n\nQuestion: {question}\n\nYour answer should be like below format.\n\nAnswer: ''', img_path=None)
+        opinion, opinion_usage = v.chat(f'''Given the examplers, please return your answer to the medical query among the option provided.\n\n{fewshot_examplers}\n\nQuestion: {question}\n\nYour answer should be like below format.\n\nAnswer: ''', img_path=None)
+        total_usage['prompt_tokens'] += opinion_usage['prompt_tokens']
+        total_usage['completion_tokens'] += opinion_usage['completion_tokens']
         initial_report += f"({k.lower()}): {opinion}\n"
         round_opinions[1][k.lower()] = opinion
 
@@ -390,7 +408,9 @@ def process_intermediate_query(question, examplers, model, args):
         
         assessment = "".join(f"({k.lower()}): {v}\n" for k, v in round_opinions[n].items())
 
-        report = agent_rs.chat(f'''Here are some reports from different medical domain experts.\n\n{assessment}\n\nYou need to complete the following steps\n1. Take careful and comprehensive consideration of the following reports.\n2. Extract key knowledge from the following reports.\n3. Derive the comprehensive and summarized analysis based on the knowledge\n4. Your ultimate goal is to derive a refined and synthesized report based on the following reports.\n\nYou should output in exactly the same format as: Key Knowledge:; Total Analysis:''')
+        report, report_usage = agent_rs.chat(f'''Here are some reports from different medical domain experts.\n\n{assessment}\n\nYou need to complete the following steps\n1. Take careful and comprehensive consideration of the following reports.\n2. Extract key knowledge from the following reports.\n3. Derive the comprehensive and summarized analysis based on the knowledge\n4. Your ultimate goal is to derive a refined and synthesized report based on the following reports.\n\nYou should output in exactly the same format as: Key Knowledge:; Total Analysis:''')
+        total_usage['prompt_tokens'] += report_usage['prompt_tokens']
+        total_usage['completion_tokens'] += report_usage['completion_tokens']
         
         for turn_num in range(num_turns):
             turn_name = f"Turn {turn_num + 1}"
@@ -400,15 +420,21 @@ def process_intermediate_query(question, examplers, model, args):
             for idx, v in enumerate(medical_agents):
                 all_comments = "".join(f"{_k} -> Agent {idx+1}: {_v[f'Agent {idx+1}']}\n" for _k, _v in interaction_log[round_name][turn_name].items())
                 
-                participate = v.chat("Given the opinions from other medical experts in your team, please indicate whether you want to talk to any expert (yes/no)\n\nOpinions:\n{}".format(assessment if n == 1 else all_comments))
+                participate, participate_usage = v.chat("Given the opinions from other medical experts in your team, please indicate whether you want to talk to any expert (yes/no)\n\nOpinions:\n{}".format(assessment if n == 1 else all_comments))
+                total_usage['prompt_tokens'] += participate_usage['prompt_tokens']
+                total_usage['completion_tokens'] += participate_usage['completion_tokens']
                 
                 if 'yes' in participate.lower().strip():                
-                    chosen_expert = v.chat(f"Enter the number of the expert you want to talk to:\n{agent_list}\nFor example, if you want to talk with Agent 1. Pediatrician, return just 1. If you want to talk with more than one expert, please return 1,2 and don't return the reasons.")
+                    chosen_expert, chosen_expert_usage = v.chat(f"Enter the number of the expert you want to talk to:\n{agent_list}\nFor example, if you want to talk with Agent 1. Pediatrician, return just 1. If you want to talk with more than one expert, please return 1,2 and don't return the reasons.")
+                    total_usage['prompt_tokens'] += chosen_expert_usage['prompt_tokens']
+                    total_usage['completion_tokens'] += chosen_expert_usage['completion_tokens']
                     
                     chosen_experts = [int(ce) for ce in chosen_expert.replace('.', ',').split(',') if ce.strip().isdigit()]
 
                     for ce in chosen_experts:
-                        specific_question = v.chat(f"Please remind your medical expertise and then leave your opinion to an expert you chose (Agent {ce}. {medical_agents[ce-1].role}). You should deliver your opinion once you are confident enough and in a way to convince other expert with a short reason.")
+                        specific_question, specific_question_usage = v.chat(f"Please remind your medical expertise and then leave your opinion to an expert you chose (Agent {ce}. {medical_agents[ce-1].role}). You should deliver your opinion once you are confident enough and in a way to convince other expert with a short reason.")
+                        total_usage['prompt_tokens'] += specific_question_usage['prompt_tokens']
+                        total_usage['completion_tokens'] += specific_question_usage['completion_tokens']
                         
                         print(f" Agent {idx+1} ({agent_emoji[idx]} {medical_agents[idx].role}) -> Agent {ce} ({agent_emoji[ce-1]} {medical_agents[ce-1].role}) : {specific_question}")
                         interaction_log[round_name][turn_name][f'Agent {idx+1}'][f'Agent {ce}'] = specific_question
@@ -425,7 +451,9 @@ def process_intermediate_query(question, examplers, model, args):
 
         tmp_final_answer = {}
         for i, agent in enumerate(medical_agents):
-            response = agent.chat(f"Now that you've interacted with other medical experts, remind your expertise and the comments from other experts and make your final answer to the given question:\n{question}\nAnswer: ")
+            response, response_usage = agent.chat(f"Now that you've interacted with other medical experts, remind your expertise and the comments from other experts and make your final answer to the given question:\n{question}\nAnswer: ")
+            total_usage['prompt_tokens'] += response_usage['prompt_tokens']
+            total_usage['completion_tokens'] += response_usage['completion_tokens']
             tmp_final_answer[agent.role] = response
 
         round_answers[round_name] = tmp_final_answer
@@ -467,7 +495,9 @@ def process_intermediate_query(question, examplers, model, args):
     moderator = Agent("You are a final medical decision maker who reviews all opinions from different medical experts and make final decision.", "Moderator", model_info=model)
     moderator.chat('You are a final medical decision maker who reviews all opinions from different medical experts and make final decision.')
     
-    _decision = moderator.temp_responses(f"Given each agent's final answer, please review each agent's opinion and make the final answer to the question by taking majority vote. Your answer should be like below format:\nAnswer: C) 2th pharyngeal arch\n{final_answer}\n\nQuestion: {question}", img_path=None)
+    _decision, _decision_usage = moderator.temp_responses(f"Given each agent's final answer, please review each agent's opinion and make the final answer to the question by taking majority vote. Your answer should be like below format:\nAnswer: C) 2th pharyngeal arch\n{final_answer}\n\nQuestion: {question}", img_path=None)
+    total_usage['prompt_tokens'] += _decision_usage['prompt_tokens']
+    total_usage['completion_tokens'] += _decision_usage['completion_tokens']
     final_decision = {'majority': _decision}
 
     emoji = '\U0001F468\u200D\u2696\uFE0F'
@@ -477,16 +507,19 @@ def process_intermediate_query(question, examplers, model, args):
     # Parse the final decision
     decision_agent = Agent(instruction='You are an answer parser.', role='Answer Parser', model_info=model)
     decision_agent.chat('You are an answer parser.')
-    decision_answer = decision_agent.chat(f'The following are multiple choice questions (with answers) about medical knowledge.\n\nHere is the question: {question}\n\nOnly output A, B, C, D, or E from the following {final_decision}.', img_path=None)
+    decision_answer, decision_answer_usage = decision_agent.chat(f'The following are multiple choice questions (with answers) about medical knowledge.\n\nHere is the question: {question}\n\nOnly output A, B, C, D, or E from the following {final_decision}.', img_path=None)
+    total_usage['prompt_tokens'] += decision_answer_usage['prompt_tokens']
+    total_usage['completion_tokens'] += decision_answer_usage['completion_tokens']
     
     return {
         'majority': final_decision,
         'answer': decision_answer
-    }
+    }, total_usage
 
 def process_advanced_query(question, model, args):
     print("[STEP 1] Recruitment")
     group_instances = []
+    total_usage = {'prompt_tokens': 0, 'completion_tokens': 0}
 
     recruit_prompt = f"""You are an experienced medical expert. Given the complex medical query, you need to organize Multidisciplinary Teams (MDTs) and the members in MDT to make accurate and robust answer."""
 
@@ -496,7 +529,10 @@ def process_advanced_query(question, model, args):
     num_teams = 3  # You can adjust this number as needed
     num_agents = 3  # You can adjust this number as needed
 
-    recruited = tmp_agent.chat(f"Question: {question}\n\nYou should organize {num_teams} MDTs with different specialties or purposes and each MDT should have {num_agents} clinicians. Considering the medical question and the options, please return your recruitment plan to better make an accurate answer.\n\nFor example, the following is an example answer:\nGroup 1 - Initial Assessment Team (IAT)\nMember 1: Otolaryngologist (ENT Surgeon) (Lead) - Specializes in ear, nose, and throat surgery, including thyroidectomy. This member leads the group due to their critical role in the surgical intervention and managing any surgical complications, such as nerve damage.\nMember 2: General Surgeon - Provides additional surgical expertise and supports in the overall management of thyroid surgery complications.\nMember 3: Anesthesiologist - Focuses on perioperative care, pain management, and assessing any complications from anesthesia that may impact voice and airway function.\n\nGroup 2 - Diagnostic Evidence Team (DET)\nMember 1: Endocrinologist (Lead) - Oversees the long-term management of Graves' disease, including hormonal therapy and monitoring for any related complications post-surgery.\nMember 2: Speech-Language Pathologist - Specializes in voice and swallowing disorders, providing rehabilitation services to improve the patient's speech and voice quality following nerve damage.\nMember 3: Neurologist - Assesses and advises on nerve damage and potential recovery strategies, contributing neurological expertise to the patient's care.\n\nGroup 3 - Patient History Team (PHT)\nMember 1: Psychiatrist or Psychologist (Lead) - Addresses any psychological impacts of the chronic disease and its treatments, including issues related to voice changes, self-esteem, and coping strategies.\nMember 2: Physical Therapist - Offers exercises and strategies to maintain physical health and potentially support vocal function recovery indirectly through overall well-being.\nMember 3: Vocational Therapist - Assists the patient in adapting to changes in voice, especially if their profession relies heavily on vocal communication, helping them find strategies to maintain their occupational roles.\n\nGroup 4 - Final Review and Decision Team (FRDT)\nMember 1: Senior Consultant from each specialty (Lead) - Provides overarching expertise and guidance in decision\nMember 2: Clinical Decision Specialist - Coordinates the different recommendations from the various teams and formulates a comprehensive treatment plan.\nMember 3: Advanced Diagnostic Support - Utilizes advanced diagnostic tools and techniques to confirm the exact extent and cause of nerve damage, aiding in the final decision.\n\nAbove is just an example, thus, you should organize your own unique MDTs but you should include Initial Assessment Team (IAT) and Final Review and Decision Team (FRDT) in your recruitment plan. When you return your answer, please strictly refer to the above format without any markdown symbols.")
+    recruited, recruited_usage = tmp_agent.chat(f"Question: {question}\n\nYou should organize {num_teams} MDTs with different specialties or purposes and each MDT should have {num_agents} clinicians. Considering the medical question and the options, please return your recruitment plan to better make an accurate answer.\n\nFor example, the following is an example answer:\nGroup 1 - Initial Assessment Team (IAT)\nMember 1: Otolaryngologist (ENT Surgeon) (Lead) - Specializes in ear, nose, and throat surgery, including thyroidectomy. This member leads the group due to their critical role in the surgical intervention and managing any surgical complications, such as nerve damage.\nMember 2: General Surgeon - Provides additional surgical expertise and supports in the overall management of thyroid surgery complications.\nMember 3: Anesthesiologist - Focuses on perioperative care, pain management, and assessing any complications from anesthesia that may impact voice and airway function.\n\nGroup 2 - Diagnostic Evidence Team (DET)\nMember 1: Endocrinologist (Lead) - Oversees the long-term management of Graves' disease, including hormonal therapy and monitoring for any related complications post-surgery.\nMember 2: Speech-Language Pathologist - Specializes in voice and swallowing disorders, providing rehabilitation services to improve the patient's speech and voice quality following nerve damage.\nMember 3: Neurologist - Assesses and advises on nerve damage and potential recovery strategies, contributing neurological expertise to the patient's care.\n\nGroup 3 - Patient History Team (PHT)\nMember 1: Psychiatrist or Psychologist (Lead) - Addresses any psychological impacts of the chronic disease and its treatments, including issues related to voice changes, self-esteem, and coping strategies.\nMember 2: Physical Therapist - Offers exercises and strategies to maintain physical health and potentially support vocal function recovery indirectly through overall well-being.\nMember 3: Vocational Therapist - Assists the patient in adapting to changes in voice, especially if their profession relies heavily on vocal communication, helping them find strategies to maintain their occupational roles.\n\nGroup 4 - Final Review and Decision Team (FRDT)\nMember 1: Senior Consultant from each specialty (Lead) - Provides overarching expertise and guidance in decision\nMember 2: Clinical Decision Specialist - Coordinates the different recommendations from the various teams and formulates a comprehensive treatment plan.\nMember 3: Advanced Diagnostic Support - Utilizes advanced diagnostic tools and techniques to confirm the exact extent and cause of nerve damage, aiding in the final decision.\n\nAbove is just an example, thus, you should organize your own unique MDTs but you should include Initial Assessment Team (IAT) and Final Review and Decision Team (FRDT) in your recruitment plan. When you return your answer, please strictly refer to the above format without any markdown symbols.")
+    total_usage['prompt_tokens'] += recruited_usage['prompt_tokens']
+    total_usage['completion_tokens'] += recruited_usage['completion_tokens']
+    
     print(recruited)
     groups = [group.strip() for group in recruited.split("Group") if group.strip()]
     group_strings = ["Group " + group for group in groups]
@@ -516,7 +552,9 @@ def process_advanced_query(question, model, args):
     initial_assessments = []
     for group_instance in group_instances:
         if 'initial' in group_instance.goal.lower() or 'iap' in group_instance.goal.lower():
-            init_assessment = group_instance.interact(comm_type='internal')
+            init_assessment, init_assessment_usage = group_instance.interact(comm_type='internal')
+            total_usage['prompt_tokens'] += init_assessment_usage['prompt_tokens']
+            total_usage['completion_tokens'] += init_assessment_usage['completion_tokens']
             initial_assessments.append([group_instance.goal, init_assessment])
 
     initial_assessment_report = ""
@@ -527,7 +565,9 @@ def process_advanced_query(question, model, args):
     assessments = []
     for group_instance in group_instances:
         if 'initial' not in group_instance.goal.lower() and 'iap' not in group_instance.goal.lower():
-            assessment = group_instance.interact(comm_type='internal')
+            assessment, assessment_usage = group_instance.interact(comm_type='internal')
+            total_usage['prompt_tokens'] += assessment_usage['prompt_tokens']
+            total_usage['completion_tokens'] += assessment_usage['completion_tokens']
             assessments.append([group_instance.goal, assessment])
     
     assessment_report = ""
@@ -538,7 +578,9 @@ def process_advanced_query(question, model, args):
     final_decisions = []
     for group_instance in group_instances:
         if 'review' in group_instance.goal.lower() or 'decision' in group_instance.goal.lower() or 'frdt' in group_instance.goal.lower():
-            decision = group_instance.interact(comm_type='internal')
+            decision, decision_usage = group_instance.interact(comm_type='internal')
+            total_usage['prompt_tokens'] += decision_usage['prompt_tokens']
+            total_usage['completion_tokens'] += decision_usage['completion_tokens']
             final_decisions.append([group_instance.goal, decision])
     
     compiled_report = ""
@@ -550,14 +592,18 @@ def process_advanced_query(question, model, args):
     tmp_agent = Agent(instruction=decision_prompt, role='Decision Maker', model_info=model)
     tmp_agent.chat(decision_prompt)
 
-    final_decision = tmp_agent.temp_responses(f"""Investigation:\n{initial_assessment_report}\n\nQuestion: {question}""", img_path=None)
+    final_decision, final_decision_usage = tmp_agent.temp_responses(f"""Investigation:\n{initial_assessment_report}\n\nQuestion: {question}""", img_path=None)
+    total_usage['prompt_tokens'] += final_decision_usage['prompt_tokens']
+    total_usage['completion_tokens'] += final_decision_usage['completion_tokens']
 
     # Parse the final decision
     decision_agent = Agent(instruction='You are an answer parser.', role='Answer Parser', model_info=model)
     decision_agent.chat('You are an answer parser.')
-    decision_answer = decision_agent.chat(f'The following are multiple choice questions (with answers) about medical knowledge.\n\nHere is the question: {question}\n\nOnly output A, B, C, D, or E from the following {final_decision}.', img_path=None)
+    decision_answer, decision_answer_usage = decision_agent.chat(f'The following are multiple choice questions (with answers) about medical knowledge.\n\nHere is the question: {question}\n\nOnly output A, B, C, D, or E from the following {final_decision}.', img_path=None)
+    total_usage['prompt_tokens'] += decision_answer_usage['prompt_tokens']
+    total_usage['completion_tokens'] += decision_answer_usage['completion_tokens']
     
     return {
         'majority': final_decision,
         'answer': decision_answer
-    }
+    }, total_usage

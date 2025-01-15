@@ -1,8 +1,10 @@
 from prompt_utils import *
 from data_utils import *
+import time
 
 
 def fully_decode(qid, realqid, question, options, gold_answer, handler, args, dataobj):
+    start_time = time.time()
 
     question_domains, options_domains, question_analyses, option_analyses, syn_report, output = "", "", "", "", "", ""
     vote_history, revision_history, syn_repo_history = [], [], []
@@ -128,6 +130,8 @@ def fully_decode(qid, realqid, question, options, gold_answer, handler, args, da
                 total_completion_tokens += usage.completion_tokens
                 ans, output = cleansing_final_output(output)
 
+    end_time = time.time()
+    total_time = end_time - start_time
 
     data_info = {
         'id':qid,
@@ -146,7 +150,8 @@ def fully_decode(qid, realqid, question, options, gold_answer, handler, args, da
         'raw_output': output,
         'total_prompt_tokens': total_prompt_tokens,
         'total_completion_tokens': total_completion_tokens,
-        'total_tokens': total_prompt_tokens + total_completion_tokens
+        'total_tokens': total_prompt_tokens + total_completion_tokens,
+        'total_time': total_time
     }
     
     return data_info

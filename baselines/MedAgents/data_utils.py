@@ -14,18 +14,10 @@ class QADataset:
             self.model_name = args.model_name
         self.dataset_name = args.dataset_name
         self.dir_path = args.dataset_dir
-        self.split = args.split  # train / test / sampled_50_5options / sampled_50_hard / sampled_50
+        self.split = args.split  # train / test / sampled_50_hard / sampled_50 / test_hard
         self.load() # load dataset -> load data in self.data
 
-        # load answers -> self.choice_ref / self.ref
-        if args.dataset_name.lower() == 'medqa':
-            self.build_choice_ref_MedQA()
-        elif args.dataset_name.lower() == 'medmcqa' or 'mmlu' in args.dataset_name.lower():
-            self.build_choice_ref_MedMCQA()
-        elif args.dataset_name.lower() == 'pubmedqa':
-            self.build_choice_ref_MedMCQA()
-        elif args.dataset_name.lower() == 'medicationqa':
-            self.build_ref()
+        self.build_choice_ref_MedQA()
         
 
     def load(self): # load dataset -> self.data
