@@ -31,9 +31,8 @@ def process_query(question, choices, args):
     expert_list = triage_unit.run(question, choices, MEDICAL_SPECIALTIES_GPT_SELECTED, 5)
     search_unit = SearchUnit(args, retrieval_client, retriever, device)
     moderation_unit = ModerationUnit(args)
-    discussion_unit = DiscussionUnit(expert_list, search_unit, moderation_unit, args.llm_debate_max_round)
-    discussion_unit._decomposed_rag(question, choices, args.rewrite, args.review)
-    results = discussion_unit.simultaneous_talk_summarizer_v2(args.llm_debate_max_round)
+    discussion_unit = DiscussionUnit(args,expert_list, search_unit, moderation_unit)
+    results = discussion_unit.run(question, choices, args.llm_debate_max_round)
     return results, search_unit.get_oom_count()
 
 def parse_args():
@@ -80,6 +79,8 @@ def parse_args():
                         help='Presence penalty for LLM generation')
     parser.add_argument('--frequency_penalty', type=float, default=0.0,
                         help='Frequency penalty for LLM generation')
+    parser.add_argument('--max_retries', type=int, default=5,
+                        help='Maximum retries for LLM generation')
     return parser.parse_args()
 
 

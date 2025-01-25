@@ -1,7 +1,7 @@
 import os
 import json
 import time
-from typing import List, Dict
+from typing import List, Dict, Tuple, Optional
 from openai import AzureOpenAI, OpenAI
 import argparse
 import utils
@@ -9,48 +9,69 @@ import warnings
 from constants import MEDICAL_SPECIALTIES_GPT_SELECTED, FORMAT_INST
 from utils import retrieve, rerank, retrieve_filtered_sources
 from abc import ABC, abstractmethod
+from pymilvus import MilvusClient
 
 retrieval_client = MilvusClient(uri=os.getenv("MILVUS_URI"))
 
 llm_client = AzureOpenAI(
-    azure_endpoint=os.getenv("AZURE_ENDPOINT"),
+    azure_endpoint=os.getenv("AZURE_ENDPOINT"), 
     api_key=os.getenv("AZURE_API_KEY"),
     api_version=os.getenv("AZURE_API_VERSION")
 )
 
-def _format_question(question, options):
+def _format_question(question: str, options: Dict[str, str]) -> str:
     text = f"{question}\n\n"
     for option, choice in options.items():
         text += f"({choice}) {option}\n"
     return text
 
 class LLMAgent:
+    """A medical expert agent powered by a large language model.
+
+    This agent represents a medical expert in a specific domain and handles interactions
+    with an LLM API to generate responses to medical queries.
+
+    Args:
+        domain (str): The medical specialty/domain of the expert
+        system_prompt (str, optional): Custom system prompt. If not provided, uses default domain-based prompt
+        args (argparse.Namespace): Configuration arguments for the LLM
+
+    Attributes:
+        domain (str): The agent's medical specialty/domain
+        system_prompt (str): The system prompt defining the agent's role
+        history (list): Conversation history as list of message dicts
+        token_usage (dict): Tracks prompt and completion token usage
+    """
+
     def __init__(self, domain: str, system_prompt: str = None, args: argparse.Namespace = None):
-        self.token_usage = {'prompt_tokens': 0, 'completion_tokens': 0}
         self.domain = domain
         self.system_prompt = (
             system_prompt.format(self.domain) if system_prompt 
             else f"You are a medical expert in the domain of {self.domain}."
         )
         self.history = [{'role': 'system', 'content': self.system_prompt}]
+        self.token_usage = {'prompt_tokens': 0, 'completion_tokens': 0}
         self.args = args
+        self.max_retries = getattr(args, 'max_retries', 5)
 
-    def chat(
-        self, 
-        input_text: str, 
-        return_dict: Dict[str, str] = None, 
-        save: bool = False
-    ) -> str:
-        if return_dict:
-            return_instruction = FORMAT_INST.format(json.dumps(return_dict, indent=4))
-            full_input = f"{input_text}\n\n{return_instruction}"
-        else:
-            full_input = input_text
+    def chat(self, input_text: str, return_dict: Dict[str, str] = None, save: bool = True) -> str:
+        """Generates a response to the input text using the LLM.
 
-        response = self._generate_response(
-            self.history + [{'role': 'user', 'content': full_input}], 
-            return_dict
+        Args:
+            input_text (str): The input prompt/question
+            return_dict (Dict[str, str], optional): Expected response format specification
+            save (bool): Whether to save the interaction in conversation history
+
+        Returns:
+            str: The generated response text
+        """
+        full_input = (
+            f"{input_text}\n\n{FORMAT_INST.format(json.dumps(return_dict, indent=4))}"
+            if return_dict else input_text
         )
+
+        messages = self.history + [{'role': 'user', 'content': full_input}]
+        response = self._generate_response(messages, return_dict)
 
         if save:
             self.history.extend([
@@ -58,17 +79,24 @@ class LLMAgent:
                 {'role': 'assistant', 'content': response}
             ])
 
-        self._log_interaction(full_input, response)
+        print("\n--------------FULL_INPUT--------------")
+        print(full_input)
+        print("\n--------------RESPONSE--------------")
+        print(response)
+
         return response
 
-    def _generate_response(
-        self, 
-        messages: List[Dict[str, str]], 
-        return_dict: Dict[str, str] = None, 
-        max_retries: int = 100
-    ) -> str:
-        attempt = 0
-        while attempt < max_retries:
+    def _generate_response(self, messages: List[Dict[str, str]], return_dict: Dict[str, str] = None) -> str:
+        """Makes API calls to generate responses, handling retries and errors.
+
+        Args:
+            messages (List[Dict[str, str]]): The conversation messages
+            return_dict (Dict[str, str], optional): Expected response format
+
+        Returns:
+            str: The generated response or error message
+        """
+        for attempt in range(self.max_retries):
             try:
                 request_params = {
                     "model": self.args.llm_model,
@@ -84,30 +112,19 @@ class LLMAgent:
                     request_params["response_format"] = {"type": "json_object"}
 
                 response = llm_client.chat.completions.create(**request_params)
-                self._update_token_usage(response)
+                self.token_usage['prompt_tokens'] += response.usage.prompt_tokens
+                self.token_usage['completion_tokens'] += response.usage.completion_tokens
 
                 return response.choices[0].message.content
+
             except Exception as e:
                 if "rate" in str(e).lower() or "exceeded" in str(e).lower():
                     print('Rate limit exceeded. Retrying...')
-                    attempt += 1
                     time.sleep(30)
-                else:
-                    return f"Error generating response: {e}"
+                    continue
+                return f"Error generating response: {e}"
+
         return "Error: Unable to generate response after multiple attempts due to rate limits."
-
-    def _update_token_usage(self, response):
-        self.token_usage['prompt_tokens'] += response.usage.prompt_tokens
-        self.token_usage['completion_tokens'] += response.usage.completion_tokens
-
-    def _log_interaction(self, input_text: str, response: str):
-        print("\n--------------FULL_INPUT--------------")
-        print(input_text)
-        print("\n--------------RESPONSE--------------")
-        print(response)
-
-    def get_history(self) -> List[Dict[str, str]]:
-        return self.history
 
 class BaseUnit(ABC):
     def __init__(self, args: argparse.Namespace = None):
@@ -128,6 +145,16 @@ class BaseUnit(ABC):
 
 
 class TriageUnit(BaseUnit):
+    """A unit that triages medical questions by classifying them into relevant medical specialties.
+
+    This unit uses LLM agents to analyze medical questions and determine the most appropriate medical 
+    specialties needed to address them. It contains two agents:
+    - QuestionClassifier: Analyzes the question text to determine relevant specialties
+    - OptionClassifier: Analyzes both question and answer options to determine relevant specialties
+
+    Args:
+        args (argparse.Namespace): Arguments containing LLM configuration
+    """
     def __init__(self, args: argparse.Namespace = None):
         super().__init__(args)
         self.agents = {
@@ -135,8 +162,24 @@ class TriageUnit(BaseUnit):
             'OptionClassifier': LLMAgent("Options Triage", "As a medical expert, you possess the ability to discern the most relevant fields of expertise needed to address a multiple-choice question encapsulating a specific medical context.", args)
         }
 
-    def run(self, question: str, choices: str, medical_fields: List[str], num_fields: int = 5, options: str = None) -> List[str]:
+    def triage_question(self, question: str, choices: str, medical_fields: List[str], num_fields: int = 5, options: str = None) -> Tuple[List[LLMAgent], List[float]]:
+        """Classifies a medical question into relevant specialties and assigns weights.
+
+        Args:
+            question (str): The medical question to classify
+            choices (str): The answer choices for the question
+            medical_fields (List[str]): List of available medical specialties to choose from
+            num_fields (int, optional): Number of specialties to select. Defaults to 5.
+            options (str, optional): Additional options text to consider. Defaults to None.
+
+        Returns:
+            Tuple[List[LLMAgent], List[float]]: List of LLMAgent experts specialized in the selected medical fields
+            and their corresponding weights
+        """
         domain_format = {f"Field{i}": "" for i in range(num_fields)}
+        weight_format = {f"Weight{i}": 0.0 for i in range(num_fields)}
+        format_dict = {**domain_format, **weight_format}
+        
         try:
             if options:
                 prompt = (
@@ -144,24 +187,60 @@ class TriageUnit(BaseUnit):
                     f"1. Carefully read the medical scenario presented in the question: '''{_format_question(question, choices)}'''.\n"
                     f"2. The available options are: '''{options}'''. Strive to understand the fundamental connections between the question and the options.\n"
                     f"3. Based on the medical scenario in it, classify the question into {num_fields} different subfields of medicine: {', '.join(medical_fields)}.\n"
+                    f"4. Assign a weight between 0 and 1 to each field indicating its relevance (weights should sum to 1).\n"
                 )
-                response = self.agents['OptionClassifier'].chat(prompt, return_dict=domain_format)
+                response = self.agents['OptionClassifier'].chat(prompt, return_dict=format_dict)
             else:
                 prompt = (
                     f"You need to complete the following steps:\n"
                     f"1. Carefully read the medical scenario presented in the question: '''{_format_question(question, choices)}'''.\n"
                     f"2. Based on the medical scenario in it, classify the question into {num_fields} different subfields of medicine: {', '.join(medical_fields)}.\n"
+                    f"3. Assign a weight between 0 and 1 to each field indicating its relevance (weights should sum to 1).\n"
                 )
-                response = self.agents['QuestionClassifier'].chat(prompt, return_dict=domain_format)
-            specialty_list = [domain for domain in response.values()]
+                response = self.agents['QuestionClassifier'].chat(prompt, return_dict=format_dict)
+            
+            specialty_list = [response[f"Field{i}"] for i in range(num_fields)]
+            weights = [float(response[f"Weight{i}"]) for i in range(num_fields)]
+            
         except (IndexError, ValueError, Exception):
             warnings.warn("Failed to classify question, using default specialties")
             specialty_list = [f"General Medicine_{i+1}" for i in range(num_fields)]
-        expert_list = [LLMAgent(specialty, args=self.args) for specialty in specialty_list]
+            weights = [1.0/num_fields] * num_fields
+            
+        expert_list = {specialty: (LLMAgent(specialty, args=self.args), weights[i]) for i, specialty in enumerate(specialty_list)}
         return expert_list
+    
+    def run(self, question: str, choices: str, medical_fields: List[str], num_fields: int = 5, options: str = None) -> Tuple[List[LLMAgent], List[float]]:
+        """Main entry point to run the triage process.
+
+        Args:
+            question: The medical question to analyze
+            choices: The answer choices
+            medical_fields: Available medical specialties
+            num_fields: Number of specialties to select
+            options: Additional options text
+
+        Returns:
+            Tuple[List[LLMAgent], List[float]]: List of LLMAgent experts for the selected specialties
+            and their corresponding weights
+        """
+        return self.triage_question(question, choices, medical_fields, num_fields, options)
 
 
 class SearchUnit(BaseUnit):
+    """A unit that handles document retrieval and evaluation for medical questions.
+
+    This unit manages the process of retrieving relevant medical documents, rewriting queries,
+    and evaluating document relevance. It contains two agents:
+    - QueryRewriter: Rewrites queries to improve document retrieval
+    - DocumentEvaluator: Evaluates relevance of retrieved documents
+
+    Args:
+        args: Arguments containing search configuration
+        retrieval_client: Client for document retrieval
+        retriever: Document retrieval system
+        device: Compute device to use
+    """
     def __init__(self, args=None, retrieval_client=None, retriever=None, device=None):
         super().__init__(args)
         self.agents = {
@@ -179,7 +258,16 @@ class SearchUnit(BaseUnit):
             setattr(self, attr, getattr(args, attr))
         self.oom_count = 0
 
-    def _retrieve_query(self, question, choices) -> List[str]:
+    def retrieve_query(self, question, choices) -> List[str]:
+        """Retrieves relevant documents for a given question.
+
+        Args:
+            question: The medical question
+            choices: The answer choices
+
+        Returns:
+            List[str]: List of retrieved document texts
+        """
         formatted_query = _format_question(question, choices)
         try:
             # First retrieve filtered sources
@@ -210,7 +298,17 @@ class SearchUnit(BaseUnit):
         # Remove duplicates while preserving order
         return list(dict.fromkeys(docs))
 
-    def _review_documents(self, question, choices, documents) -> List[str]:
+    def review_documents(self, question, choices, documents) -> List[str]:
+        """Reviews retrieved documents for relevance.
+
+        Args:
+            question: The medical question
+            choices: The answer choices 
+            documents: List of documents to review
+
+        Returns:
+            List[str]: List of documents deemed relevant
+        """
         review_prompt = (
             "Evaluate the relevance of the following document to the given query\n"
             "Instructions:\n"
@@ -230,7 +328,7 @@ class SearchUnit(BaseUnit):
         for doc in documents:
             try:
                 response = self.agents['DocumentEvaluator'].chat(
-                    review_prompt.format(formatted_query, doc)
+                    review_prompt.format(formatted_query, doc), save=False      # COMMENT(dainiu): we don't need to save history here
                 )
                 if any(label in response.lower() for label in ["ully", "artially"]):
                     reviewed_docs.append(doc)
@@ -239,7 +337,16 @@ class SearchUnit(BaseUnit):
 
         return reviewed_docs
 
-    def _rewrite_query_pseudodoc(self, question, choices):
+    def rewrite_query_pseudodoc(self, question, choices):
+        """Rewrites a query to improve document retrieval.
+
+        Args:
+            question: The medical question
+            choices: The answer choices
+
+        Returns:
+            str: Rewritten query optimized for retrieval
+        """
         few_shot_prompt = f"..."\
             f"Example:"\
             f""\
@@ -258,11 +365,31 @@ class SearchUnit(BaseUnit):
             f""\
             f"Query: {question} {' '.join([key + ') :' + value for key, value in choices.items()])}"\
             f"Passage:"
-        return self.agents['QueryRewriter'].chat(few_shot_prompt)
+        return self.agents['QueryRewriter'].chat(few_shot_prompt, save=False)  # COMMENT(dainiu): we don't need to save history here
+
+    def run(self, question, choices, rewrite=False, review=False):
+        """Main entry point to run the search process.
+
+        Args:
+            question: The medical question
+            choices: The answer choices
+            rewrite (bool): Whether to rewrite the query
+            review (bool): Whether to review retrieved documents
+
+        Returns:
+            List[str]: List of relevant documents
+        """
+        og_question = question
+        if rewrite:
+            question = self.rewrite_query_pseudodoc(question, choices)
+        documents = self.retrieve_query(question, choices)
+        if review:
+            documents = self.review_documents(og_question, choices, documents)
+        return documents
 
 
 class ModerationUnit(BaseUnit):
-    def __init__(self, args=None):
+    def __init__(self, args):
         super().__init__(args)
         self.agents = {
             'Moderator': LLMAgent(
@@ -277,16 +404,176 @@ class ModerationUnit(BaseUnit):
             )
         }
 
+    def make_decision(self, question: str, choices: List[str], chat_history: Dict[str, str], agents: Dict[str, Tuple[str, float]], final: bool = True) -> Dict[str, str]:
+        """Makes a final decision based on expert discussion.
+        
+        Args:
+            question: The medical question being discussed
+            choices: Available answer choices 
+            chat_history: History of expert discussions
+            agents: Dictionary mapping domain to (agent, weight) tuple
+            final: Whether this is the final decision round
+
+        Returns:
+            dict: Decision containing FinalAnswer, Confidence, Justification, Limitations and IsFinal
+        """
+        # Extract each agent's answer, justification and confidence from chat history
+        expert_analysis = {}
+        for domain, (_, weight) in agents.items():
+            expert_input = chat_history.get(domain, {})
+            if not expert_input:
+                continue
+                
+            answer = expert_input.get('answer', '')
+            justification = expert_input.get('justification', '')
+            confidence = expert_input.get('confidence', 'low')
+            expert_analysis[domain] = {
+                'answer': answer,
+                'justification': justification,
+                'confidence': confidence,
+                'weight': weight
+            }
+
+        # Calculate weighted votes for each choice considering confidence
+        vote_results = {choice: 0.0 for choice in choices}
+        
+        for domain, analysis in expert_analysis.items():
+            # Apply evidence and confidence-based weighting
+            vote_weight = analysis['weight']
+            confidence = analysis['confidence'].lower()
+            
+            # Adjust weight based on confidence
+            if confidence == 'high':
+                vote_weight *= 1.2
+            elif confidence == 'medium':
+                vote_weight *= 1.0
+            else:  # low confidence
+                vote_weight *= 0.8
+                
+            justification = analysis['justification'].lower()
+            if "research evidence" in justification:
+                vote_weight *= 1.1
+            if "clinical experience" in justification:
+                vote_weight *= 1.1
+                
+            # Count weighted vote
+            answer = analysis['answer']
+            if answer in choices:
+                vote_results[answer] += vote_weight
+
+        total_votes = sum(vote_results.values())
+        missing_expertise = []
+        
+        if total_votes > 0:
+            vote_shares = {k: v/total_votes for k,v in vote_results.items()}
+            winning_choice = max(vote_shares.items(), key=lambda x: x[1])
+            confidence = "high" if winning_choice[1] > 0.7 else "medium" if winning_choice[1] > 0.5 else "low"
+
+            if confidence == "low":
+                missing_expertise.append("Need more expert opinions due to low confidence")
+        else:
+            winning_choice = (list(choices)[0], 0)
+            confidence = "low"
+            missing_expertise.append("No valid votes recorded")
+
+        # Have decision maker validate and explain
+        decision_prompt = (
+            f"Question: {question}\n\n"
+            f"Expert Analysis:\n"
+        )
+        
+        for domain, analysis in expert_analysis.items():
+            decision_prompt += f"\n{domain} Expert:\n"
+            decision_prompt += f"Answer: {analysis['answer']}\n"
+            decision_prompt += f"Justification: {analysis['justification']}\n"
+            decision_prompt += f"Confidence: {analysis['confidence']}\n"
+            
+        decision_prompt += f"\nVote Distribution:\n{json.dumps(vote_results, indent=2)}\n\n"
+        decision_prompt += f"Preliminary Answer: {winning_choice[0]} (Confidence: {confidence})\n\n"
+        if missing_expertise:
+            decision_prompt += f"Missing Expertise: {', '.join(missing_expertise)}\n\n"
+        decision_prompt += "Please validate this decision and provide your final analysis."
+
+        if final:
+            decision_prompt += "This is the final decision round. You should provide a final answer."
+        else:
+            decision_prompt += "This is not the final decision round. But you can provide a final answer if you think it is necessary."
+
+        return self.agents['DecisionMaker'].chat(
+            decision_prompt,
+            {
+                'Answer': f'Select from {" ".join([f"({choice})" for choice in choices])}',
+                'Justification': 'Detailed reasoning for the decision',
+                'Limitations': 'Key uncertainties or limitations in the analysis',
+                'IsFinal': 'true if decision is final, false if more expertise needed'
+            },
+            save=True,
+        )
+
+    def run(self, question: str, choices: str, chat_history: Dict[str, Dict[str, str]], agents: Dict[str, Tuple[str, float]], final: bool = False) -> Tuple[str, str]:
+        """Runs a round of discussion between experts and makes a decision.
+        
+        Args:
+            question (str): The medical question being discussed
+            choices (list): The answer choices
+            chat_history (Dict[str, Dict[str, str]]): History of expert discussions with answers and justifications
+            agents (Dict[str, Tuple[str, float]]): List of agents
+
+        Returns:
+            Tuple[str, str]: Summary of the discussion and the final decision
+        """
+        response = self.make_decision(question, choices, chat_history, agents, final)
+        response['Answer'] = response['Answer'].replace('(', '').replace(')', '')
+        summary = self.summarize_discussion(chat_history, response)
+        return summary, response
+
+    def summarize_discussion(self, expert_solutions: Dict[str, Dict[str, str]], decision: Dict[str, str]):
+        """Summarizes the key points, conclusions and decision making process from the discussion.
+        
+        Args:
+            expert_solutions: Dictionary mapping domain to expert's answer and justification
+            decision: The final decision including answer, justification and limitations
+        """
+        summarize_prompt = (
+            "Summarize the following expert solutions and decision making process. Provide a comprehensive report that includes all perspectives:\n\n"
+            "1. **Expert Analysis**:\n"
+        )
+        
+        for domain, solution in expert_solutions.items():
+            summarize_prompt += f"\n{domain} Expert:\n"
+            summarize_prompt += f"Answer: {solution.get('answer', '')}\n"
+            summarize_prompt += f"Justification: {solution.get('justification', '')}\n"
+            
+        summarize_prompt += (
+            "\n2. **Decision Process**:\n"
+            f"Final Answer: {decision.get('Answer', '')}\n"
+            f"Justification: {decision.get('Justification', '')}\n"
+            f"Limitations: {decision.get('Limitations', '')}\n"
+            "3. **Detailed Analysis**:\n"
+            "   - For each proposed answer, analyze:\n"
+            "     - Supporting experts and their key arguments\n"
+            "     - Evidence strength and potential limitations\n"
+            "     - Contradicting viewpoints\n\n"
+            "4. **Key Insights**:\n"
+            "   - Areas of expert consensus\n"
+            "   - Unresolved disagreements\n"
+            "   - Suggested follow-up questions\n\n"
+            "Respond in the structured format described above."
+        )
+        
+        return self.agents['Moderator'].chat(summarize_prompt, save=False)
+
+
+# TODO(dainiu): We need better design for the discussion unit.
 class DiscussionUnit(BaseUnit):
-    def __init__(self, expert_list, args=None):
+    def __init__(self, args, expert_list, search_unit, moderation_unit):
         super().__init__(args)
-        self.agents = {agent.domain: agent for agent in expert_list}
-        self.search_unit = args.search_unit
-        self.moderation_unit = args.moderation_unit
-        self.max_iterations = args.llm_debate_max_round
+        self.agents = expert_list
+        self.search_unit = search_unit
+        self.moderation_unit = moderation_unit
         self.q_a_pairs = []
- 
-    def _decompose_query(self, question, choices, agent, qa_pairs):
+
+    def decompose_query(self, question, choices, agent, qa_pairs):
         decompose_prompt = f"Main question to solve: {_format_question(question, choices)}\n"
         if qa_pairs:
             qa_context = ""
@@ -302,29 +589,27 @@ class DiscussionUnit(BaseUnit):
             "Each expert should generate a distinct question aimed at uncovering more relevant information for the main question."
         )
     
-        response = agent.chat(decompose_prompt, {'Query': 'string'})
+        response = agent.chat(
+            decompose_prompt, 
+            return_dict={
+                'Query': 'A specific question that explores key medical concepts, diagnostic criteria, treatment approaches, or other relevant aspects needed to address the main question'
+            },
+            save=False  # TODO(dainiu): look into the save flag, does the agent need to look at history when decomposing a question?
+        )
         decomposed_query = json.loads(response)['Query']
         return decomposed_query
 
-    def _request_search(self, question, choices, rewrite=False, review=False):
-        og_question = question
-        if rewrite:
-            question = self.search_unit._rewrite_query_pseudodoc(question, choices)
-        documents = self.search_unit._retrieve_query(question, choices)
-        if review:
-            documents = self.search_unit._review_documents(og_question, choices, documents)
-        return documents
-    
-    def _decomposed_rag(self, question, choices, rewrite=False, review=False):
-        for idx, agent in self.agents.items():
-            decomposed_query = self._decompose_query(question, choices, agent, self.q_a_pairs)
+    # TODO(dainiu): Do we need to run this for each round of debate?
+    def decomposed_rag(self, question, choices, rewrite=False, review=False):
+        for agent, weight in self.agents.values():
+            decomposed_query = self.decompose_query(question, choices, agent, self.q_a_pairs)
             if rewrite == "Both":
                 decomposed_documents = (
-                    self._request_search(decomposed_query, choices, rewrite=False, review=review)
-                    + self._request_search(decomposed_query, choices, rewrite=True, review=review)
+                    self.search_unit.run(decomposed_query, choices, rewrite=False, review=review)
+                    + self.search_unit.run(decomposed_query, choices, rewrite=True, review=review)
                 )
             else:
-                decomposed_documents = self._request_search(decomposed_query, choices, rewrite=rewrite, review=review)
+                decomposed_documents = self.search_unit.run(decomposed_query, choices, rewrite=rewrite, review=review)
             joined_documents = "\n".join(decomposed_documents)
             rag_prompt = (
                         "The following is a decomposed medical question made by a medical expert from original question. Provide a brief yet informative answer "
@@ -349,81 +634,94 @@ class DiscussionUnit(BaseUnit):
 #                f"**Decomposed Question:**\n{decomposed_query}\n\n"
 #                "**Your Answer:**"
 #            )
-            decomposed_answer = agent.chat(rag_prompt)
+            decomposed_answer = agent.chat(rag_prompt, save=False)  # TODO(dainiu): look into the save flag, does the agent need to look at history when decomposing a question?
             self.q_a_pairs.append({
                 'domain': agent.domain,
+                'weight': weight,
                 'question': decomposed_query,
                 'answer': decomposed_answer
             })   
 
-    def simultaneous_talk_summarizer_v2(self, question, choices, max_round):
+    def get_expert_response(self, domain: str, question: str, choices: List[str], og_documents: str, round_num: int, summary: str):
+        """Gets expert response for a given debate round.
+        
+        Args:
+            domain: The expert domain
+            question: The medical question
+            choices: Answer choices 
+            og_documents: Original retrieved documents
+            round_num: Current debate round number
+            summary: Summary of previous debate rounds
+            
+        Returns:
+            str: Expert's response
+        """
+        agent, weight = self.agents[domain]
+        if round_num == 0:
+            user_prompt = f"The following is a multiple-choice question about medical knowledge. Solve this in a step-by-step fashion, starting by summarizing the available information. Output a single option from the given options as the final answer.\n\n"
+            user_prompt += f"Here is the relevant document: {og_documents}\n\n"
+            user_prompt += f"Here is the question: {_format_question(question, choices)}\n\n"
+            user_prompt += "Here are decomposed question and answer pairs:\n"
+            for pair in self.q_a_pairs:
+                user_prompt += f"- **Domain:** {pair['domain']}\n"
+                user_prompt += f"  - **Question:** {pair['question']}\n"
+                user_prompt += f"  - **Answer:** {pair['answer']}\n\n"
+            response = agent.chat(
+                user_prompt, 
+                return_dict={
+                    'Thought': 'A step-by-step thought process to generate the answer',
+                    'Answer': f"Please select one of the options from {choices}",
+                    'Confidence': 'Confidence level of the answer, low/medium/high',
+                    'Justification': 'Detailed reasoning for the answer'
+                },
+                save=True
+            )
+            return json.loads(response)
+        else:
+            user_prompt = f"Given summaries of solutions and decomposed question and answer pairs to the problem from other medical experts, consider their opinions as additional advice. Please think carefully and provide an updated answer.\n"
+            user_prompt += f"Here are summaries of debate from other medical experts:\n{summary}\n"
+            user_prompt += f"Here is the question:{_format_question(question, choices)}\n"
+            user_prompt += "Here are decomposed question and answer pairs:\n"
+            for pair in self.q_a_pairs:
+                user_prompt += f"- **Domain:** {pair['domain']}\n"
+                user_prompt += f"  - **Question:** {pair['question']}\n"
+                user_prompt += f"  - **Answer:** {pair['answer']}\n\n"
+            user_prompt += "Please think step-by-step and generate your output."
+            response = agent.chat(user_prompt,
+                                  return_dict={
+                                      'Thought': 'A step-by-step thought process to generate the answer',
+                                      'Answer': f"Please select one of the options from {choices}",
+                                      'Confidence': 'Confidence level of the answer, low/medium/high',
+                                      'Justification': 'Detailed reasoning for the answer'
+                                  },
+                                  save=True)
+            return json.loads(response)
+
+    def run(self, question: str, choices: List[str], max_round: int = 5):
+        self.decomposed_rag(question, choices, rewrite=True, review=False)
+
         answer_by_turns = []
-        chat_history = [[] for _ in range(max_round)]
+        chat_history = [{agent: "" for agent in self.agents.keys()} for _ in range(max_round)]
         chat_history_summary = []
-        og_documents = '\n'.join(self._request_search(question, choices, rewrite=True, review=False))
+        og_documents = '\n'.join(self.search_unit.run(question, choices, rewrite=True, review=False))
         for r in range(max_round):
             print("-"*50)
             print(f"{r}th round debate start")
             print("-"*50)
-            for i, agent in self.agents.items():
-                if r == 0:
-                    user_prompt = f"The following is a multiple-choice question about medical knowledge. Solve this in a step-by-step fashion, starting by summarizing the available information. Output a single option from the given options as the final answer.\n\n"
-                    user_prompt += f"Here is the relevant document: {og_documents}\n\n"
-                    user_prompt += f"Here is the question: {_format_question(question, choices)}\n\n"
-                    user_prompt += "Here are decomposed question and answer pairs:\n"
-                    for pair in self.q_a_pairs:
-                        user_prompt += f"- **Domain:** {pair['domain']}\n"
-                        user_prompt += f"  - **Question:** {pair['question']}\n"
-                        user_prompt += f"  - **Answer:** {pair['answer']}\n\n"
-                    response = agent.chat(user_prompt)
-                    chat_history[r].append(f"{agent.domain} Expert's solution{response}")
-                else:
-                    summaries = '\n'.join([f"{i+1}{'st' if i == 0 else 'nd' if i == 1 else 'rd' if i == 2 else 'th'} debate summary: {chat}" for i, chat in enumerate(chat_history_summary)])
-                    user_prompt = f"Given summaries of solutions and decomposed question and answer pairs to the problem from other medical experts, consider their opinions as additional advice. Please think carefully and provide an updated answer.\n"
-                    user_prompt += f"Here are summaries of debate from other medical experts:\n{summaries}\n"
-                    user_prompt += f"Here is the question:{_format_question(question, choices)}\n"
-                    user_prompt += "Here are decomposed question and answer pairs:\n"
-                    for pair in self.q_a_pairs:
-                        user_prompt += f"- **Domain:** {pair['domain']}\n"
-                        user_prompt += f"  - **Question:** {pair['question']}\n"
-                        user_prompt += f"  - **Answer:** {pair['answer']}\n\n"
-                    user_prompt += "Please think step-by-step and generate your output."
-                    response = agent.chat(user_prompt)
-                    chat_history[r].append(response)
+            for domain, (agent, weight) in self.agents.items():
+                response = self.get_expert_response(
+                    domain,
+                    question,
+                    choices,
+                    og_documents,
+                    r,
+                    '\n'.join([f"{i+1}{'st' if i == 0 else 'nd' if i == 1 else 'rd' if i == 2 else 'th'} debate summary: {chat}" for i, chat in enumerate(chat_history_summary)])
+                )
+                chat_history[r][domain] = response
 
-            joined_solutions = "\n".join([f"{agent.domain} expert's response: {chat_history[r][i]}" for i, agent in self.agents.items()])
-            summarizer_prompt = (
-                "Summarize the following expert solutions and provide a comprehensive report that includes all perspectives:\n"
-                "1. **Expert Solutions**:\n"
-                "   - Expert n: Key points, suggested solution, rationale.\n"
-                "   - Repeat as needed for all experts.\n\n"
-                "2. **Detailed Analysis**:\n"
-                "   - For each proposed answer (A, B, C, D), provide:\n"
-                "     - Experts supporting this answer and their rationale.\n"
-                "     - Key evidence, strengths, and potential weaknesses for this answer.\n"
-                "     - Contradictions or opposing arguments raised by other experts.\n\n"
-                "3. **Actionable Insights**:\n"
-                "   - Summarize key points where experts agree and why.\n"
-                "   - Highlight unresolved disagreements or areas requiring further clarification.\n"
-                "   - Propose targeted questions or new angles of inquiry for the next round to address the gaps.\n\n"
-                "Here are the expert solutions:\n"
-                f"{joined_solutions}\n"
-                "Respond in the structured format described above."
-            )
-            summary = self.moderation_unit.agents['Moderator'].chat(summarizer_prompt)
+            summary, answer = self.moderation_unit.run(question, choices, chat_history[r], self.agents, final=r == max_round - 1)
             chat_history_summary.append(summary)
-
-            summaries = '\n'.join([f"{i+1}{'st' if i == 0 else 'nd' if i == 1 else 'rd' if i == 2 else 'th'} debate summary: {chat}" for i, chat in enumerate(chat_history_summary)])
-            decision_prompt = f"Given the summary of previous debate between agents, reason over it carefully and provide a final answer.\
-                \nHere is the question:{question}\
-                \nHere is the summary of solutions made by previous turn of debate from medical experts: \n\n{chat_history_summary[-1]}\
-                \nPlease think step-by-step and generate your ourput."
-            response = self.moderation_unit.agents['DecisionMaker'].chat(decision_prompt, {
-                'Thought': 'Please provide your step-by-step reasoning process for arriving at your answer, '
-                            'including: 1) Analysis of the debate summaries and key points of agreement/disagreement between experts, '
-                            '2) Evaluation of the evidence and rationale supporting each potential answer, '
-                            '3) Explanation of why you believe your chosen answer is correct and why you ruled out other options.',
-                'Answer': f'Please pick from {" ".join(["(" + choice + ")" for choice in choices])}.'
-            })
-            answer_by_turns.append(json.loads(response)['Answer'].replace('(', '').replace(')', ''))
+            answer_by_turns.append(answer)
+            if answer['IsFinal'] == 'true':
+                break
         return answer_by_turns
