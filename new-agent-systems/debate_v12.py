@@ -30,6 +30,7 @@ llm_client = AzureOpenAI(
     api_version="2024-08-01-preview"
 )
 
+
 allowed_sources = ['cpg_2', 'statpearls_2', 'recop_2', 'textbook_2']
 sample_size = 1
 start_idx = 19
@@ -150,65 +151,24 @@ class Triage_Unit:
         return specialty_list, expert_list
 
 class Search_Unit:
-    def __init__(self, retrieval_client, retrieve_topk, rerank_topk, allowed_sources, model_q, tokenizer_q, model_c, tokenizer_c, device):
+    def __init__(self, retrieval_client, retrieve_topk, rerank_topk, allowed_sources):
         self.query_formulate_agent = LLM_Agent("Query Rewriter", llm_client, "Write a medical passage that can help answer the given query. Include key information or terminology for the answer.")
         self.document_evaluate_agent = LLM_Agent("Document Evaluator", llm_client, "You are an expert in evaluating the relevance of documents to a given query.")
         self.retrieve_topk = retrieve_topk
         self.rerank_topk = rerank_topk
         self.allowed_sources = allowed_sources
-        self.model_q = model_q
-        self.tokenizer_q = tokenizer_q
-        self.model_c = model_c
-        self.tokenizer_c = tokenizer_c
-        self.device = device
         self.oom_count = 0
-
-    def _rewrite_query_pseudodoc(self, query):
-        few_shot_prompt = f"..."\
-            f"Example:"\
-            f""\
-            f"Query: A 39-year-old woman presents to the family medicine clinic to be evaluated by her physician for weight gain. She reports feeling fatigued most of the day despite eating a healthy diet and exercising regularly. The patient smokes a half-pack of cigarettes daily and has done so for the last 23 years. She is employed as a phlebotomist by the Red Cross. She has a history of hyperlipidemia for which she takes atorvastatin. She is unaware of her vaccination history, and there is no documented record of her receiving any vaccinations. Her heart rate is 76/min, respiratory rate is 14/min, temperature is 37.3°C (99.1°F), body mass index (BMI) is 33 kg/m2, and blood pressure is 128/78 mm Hg. The patient appears alert and oriented. Lung and heart auscultation are without audible abnormalities. The physician orders a thyroid panel to determine if that patient has hypothyroidism. Which of the following recommendations may be appropriate for the patient at this time? A) Hepatitis B vaccination B) Low-dose chest CT C) Hepatitis C vaccination D) Shingles vaccination"\
-            f"Passage: against vaccine-preventable diseases. Every visit by an adult to a health-care provider should be an opportunity to provide this protection. Several factors need to be con sidered before any patient is vaccinated. These include the susceptibility of the patient, the risk of exposure to the disease, the risk from the disease, and the benefits and risks from the immunizing agent. Physicians should maintain detailed information about previous vaccina tions received by each individual, including type of vaccination, date of receipt, and adverse events, if any, following vaccination. Information should also include the person's history of vaccine-preventable illnesses, occupation, and lifestyle. Vaccine histories ideally should be based on written documentation to ascertain whether vaccines and toxoids were administered at appropriate ages and at proper intervals. Close attention to factors"\
-            f""\
-            f"Query: A 23-year-old male presents to his primary care physician after an injury during a rugby game. The patient states that he was tackled and ever since then has had pain in his knee. The patient has tried NSAIDs and ice to no avail. The patient has no past medical history and is currently taking a multivitamin, fish oil, and a whey protein supplement. On physical exam you note a knee that is heavily bruised. It is painful for the patient to bear weight on the knee, and passive motion of the knee elicits some pain. There is laxity at the knee to varus stress. The patient is wondering when he can return to athletics. Which of the following is the most likely diagnosis? A) Medial collateral ligament tear B) Lateral collateral ligament tear C) Anterior cruciate ligament tear D) Posterior cruciate ligament tear"\
-            f"Passage: Diagnosing PCL Injuries: History, Physical Examination, Imaging Studies, Arthroscopic Evaluation. Isolated posterior cruciate ligament (PCL) injuries are uncommon and can be easily missed with physical examination. The purpose of this article is to give an overview of the clinical, diagnostic and arthroscopic evaluation of a PCL injured knee. There are some specific injury mechanisms that can cause a PCL including the dashboard direct anterior blow and hyperflexion mechanisms. During the diagnostic process it is important to distinguish between an isolated or multiligament injury and whether the problem is acute or chronic. Physical examination can be difficult in an acutely injured knee because of pain and swelling, but there are specific functional tests that can indicate a PCL tear. Standard x-ray's and stress views are very useful imaging modalities"\
-            f""\
-            f"Query: A 45-year-old woman is in a high-speed motor vehicle accident and suffers multiple injuries to her extremities and abdomen. In the field, she was bleeding profusely bleeding and, upon arrival to the emergency department, she is lethargic and unable to speak. Her blood pressure on presentation is 70/40 mmHg. The trauma surgery team recommends emergency exploratory laparotomy. While the patient is in the trauma bay, her husband calls and says that the patient is a Jehovah's witness and that her religion does not permit her to receive a blood transfusion. No advanced directives are available. Which of the following is an appropriate next step? A) Provide transfusions as needed B) Withhold transfusion based on husband's request C) Obtain an ethics consult D) Obtain a court order for transfusion"\
-            f"Passage: Legal and ethical issues in safe blood transfusion. This is another D and C Act requirement which is seldom followed, possibly because there are no standard guidelines."\
-            f""\
-            f"Query: A 4-year-old male is accompanied by his mother to the pediatrician. His mother reports that over the past two weeks, the child has had intermittent low grade fevers and has been more lethargic than usual. The child’s past medical history is notable for myelomeningocele complicated by lower extremity weakness as well as bowel and bladder dysfunction. He has been hospitalized multiple times at an outside facility for recurrent urinary tract infections. The child is in the 15th percentile for both height and weight. His temperature is 100.7°F (38.2°C), blood pressure is 115/70 mmHg, pulse is 115/min, and respirations are 20/min. Physical examination is notable for costovertebral angle tenderness that is worse on the right. Which of the following would most likely be found on biopsy of this patient’s kidney? A) Mononuclear and eosinophilic infiltrate B) Replacement of renal parenchyma with foamy histiocytes C) Destruction of the proximal tubule and medullary thick ascending limb D) Tubular colloid casts with diffuse lymphoplasmacytic infiltrate"\
-            f"Passage: The natural history of urinary infection in adults. The vast majority of otherwise healthy adults with anatomically and functionally normal urinary tracts experience few untoward long-term consequences from symptomatic or asymptomatic UTIs. Effective early treatment of symptomatic infection rapidly curtails bacterial invasion and the resulting inflammatory response. Rarely, uncomplicated acute pyelonephritis causes suppuration and renal scarring. Urinary infections in patients with renal calculi, obstructed urinary tract, neurogenic bladder, or diabetes are frequently much more destructive and have ongoing sequelae. Strategies to treat both the infection and the complications are often necessary to alter this outcome."\
-            f"..."\
-            f""\
-            f"Query: {query}"\
-            f"Passage:"
-        return self.query_formulate_agent.chat(few_shot_prompt)
 
     def _retrieve_query(self, query) -> List[str]:
         retrieved_docs = []
         try:
-            docs = utils.rerank(
-                query, 
-                utils.retrieve_filtered_sources(
-                    query, 
-                    retrieval_client, 
-                    self.allowed_sources, 
-                    self.model_q, 
-                    self.tokenizer_q, 
-                    self.device,
-                    self.retrieve_topk),
-                self.model_c,
-                self.tokenizer_c,
-                self.device
-                )
+            docs = retrieve(query, retrieval_client, self.retrieve_topk, self.rerank_topk)
             retrieved_docs.extend(docs[:self.rerank_topk])
         except Exception as e:
             if "memory" in str(e).lower():
                 print('retrieve memory error')
                 self.oom_count += 1
-        seen = set()
-        seen_add = seen.add
-        return [x for x in retrieved_docs if not (x in seen or seen_add(x))]
+        return retrieved_docs
 
     def _review_documents(self, query, documents) -> List[str]:
         reviewed_docs = []
@@ -230,6 +190,28 @@ class Search_Unit:
             except Exception as e:
                 continue
         return reviewed_docs
+
+    def _rewrite_query_pseudodoc(self, query):
+        few_shot_prompt = f"Write a medical passage that can help answer the given query. Include key information or terminology for the answer."\
+            f""\
+            f"Example:"\
+            f""\
+            f"Query: A 39-year-old woman presents to the family medicine clinic to be evaluated by her physician for weight gain. She reports feeling fatigued most of the day despite eating a healthy diet and exercising regularly. The patient smokes a half-pack of cigarettes daily and has done so for the last 23 years. She is employed as a phlebotomist by the Red Cross. She has a history of hyperlipidemia for which she takes atorvastatin. She is unaware of her vaccination history, and there is no documented record of her receiving any vaccinations. Her heart rate is 76/min, respiratory rate is 14/min, temperature is 37.3°C (99.1°F), body mass index (BMI) is 33 kg/m2, and blood pressure is 128/78 mm Hg. The patient appears alert and oriented. Lung and heart auscultation are without audible abnormalities. The physician orders a thyroid panel to determine if that patient has hypothyroidism. Which of the following recommendations may be appropriate for the patient at this time? A) Hepatitis B vaccination B) Low-dose chest CT C) Hepatitis C vaccination D) Shingles vaccination"\
+            f"Passage: against vaccine-preventable diseases. Every visit by an adult to a health-care provider should be an opportunity to provide this protection. Several factors need to be con sidered before any patient is vaccinated. These include the susceptibility of the patient, the risk of exposure to the disease, the risk from the disease, and the benefits and risks from the immunizing agent. Physicians should maintain detailed information about previous vaccina tions received by each individual, including type of vaccination, date of receipt, and adverse events, if any, following vaccination. Information should also include the person's history of vaccine-preventable illnesses, occupation, and lifestyle. Vaccine histories ideally should be based on written documentation to ascertain whether vaccines and toxoids were administered at appropriate ages and at proper intervals. Close attention to factors"\
+            f""\
+            f"Query: A 23-year-old male presents to his primary care physician after an injury during a rugby game. The patient states that he was tackled and ever since then has had pain in his knee. The patient has tried NSAIDs and ice to no avail. The patient has no past medical history and is currently taking a multivitamin, fish oil, and a whey protein supplement. On physical exam you note a knee that is heavily bruised. It is painful for the patient to bear weight on the knee, and passive motion of the knee elicits some pain. There is laxity at the knee to varus stress. The patient is wondering when he can return to athletics. Which of the following is the most likely diagnosis? A) Medial collateral ligament tear B) Lateral collateral ligament tear C) Anterior cruciate ligament tear D) Posterior cruciate ligament tear"\
+            f"Passage: Diagnosing PCL Injuries: History, Physical Examination, Imaging Studies, Arthroscopic Evaluation. Isolated posterior cruciate ligament (PCL) injuries are uncommon and can be easily missed with physical examination. The purpose of this article is to give an overview of the clinical, diagnostic and arthroscopic evaluation of a PCL injured knee. There are some specific injury mechanisms that can cause a PCL including the dashboard direct anterior blow and hyperflexion mechanisms. During the diagnostic process it is important to distinguish between an isolated or multiligament injury and whether the problem is acute or chronic. Physical examination can be difficult in an acutely injured knee because of pain and swelling, but there are specific functional tests that can indicate a PCL tear. Standard x-ray's and stress views are very useful imaging modalities"\
+            f""\
+            f"Query: A 45-year-old woman is in a high-speed motor vehicle accident and suffers multiple injuries to her extremities and abdomen. In the field, she was bleeding profusely bleeding and, upon arrival to the emergency department, she is lethargic and unable to speak. Her blood pressure on presentation is 70/40 mmHg. The trauma surgery team recommends emergency exploratory laparotomy. While the patient is in the trauma bay, her husband calls and says that the patient is a Jehovah's witness and that her religion does not permit her to receive a blood transfusion. No advanced directives are available. Which of the following is an appropriate next step? A) Provide transfusions as needed B) Withhold transfusion based on husband's request C) Obtain an ethics consult D) Obtain a court order for transfusion"\
+            f"Passage: Legal and ethical issues in safe blood transfusion. This is another D and C Act requirement which is seldom followed, possibly because there are no standard guidelines."\
+            f""\
+            f"Query: A 4-year-old male is accompanied by his mother to the pediatrician. His mother reports that over the past two weeks, the child has had intermittent low grade fevers and has been more lethargic than usual. The child’s past medical history is notable for myelomeningocele complicated by lower extremity weakness as well as bowel and bladder dysfunction. He has been hospitalized multiple times at an outside facility for recurrent urinary tract infections. The child is in the 15th percentile for both height and weight. His temperature is 100.7°F (38.2°C), blood pressure is 115/70 mmHg, pulse is 115/min, and respirations are 20/min. Physical examination is notable for costovertebral angle tenderness that is worse on the right. Which of the following would most likely be found on biopsy of this patient’s kidney? A) Mononuclear and eosinophilic infiltrate B) Replacement of renal parenchyma with foamy histiocytes C) Destruction of the proximal tubule and medullary thick ascending limb D) Tubular colloid casts with diffuse lymphoplasmacytic infiltrate"\
+            f"Passage: The natural history of urinary infection in adults. The vast majority of otherwise healthy adults with anatomically and functionally normal urinary tracts experience few untoward long-term consequences from symptomatic or asymptomatic UTIs. Effective early treatment of symptomatic infection rapidly curtails bacterial invasion and the resulting inflammatory response. Rarely, uncomplicated acute pyelonephritis causes suppuration and renal scarring. Urinary infections in patients with renal calculi, obstructed urinary tract, neurogenic bladder, or diabetes are frequently much more destructive and have ongoing sequelae. Strategies to treat both the infection and the complications are often necessary to alter this outcome."\
+            f"..."\
+            f""\
+            f"Query: {query}"\
+            f"Passage:"
+        return self.query_formulate_agent.chat( )
 
     def get_oom_count(self):
         return self.oom_count
@@ -393,14 +375,10 @@ medqa_test = medqa_test[start_idx:start_idx+sample_size]
 queries = [f"{test['question']}\n\nOptions: (A) {test['options']['A']} (B) {test['options']['B']} (C) {test['options']['C']} (D) {test['options']['D']}" for test in medqa_test]
 results = [None] * len(queries)
 
-def process_query(query, task_number, gpu_ids):
-    device_id = gpu_ids[task_number % len(gpu_ids)]
-    device = torch.device(f"cuda:{device_id}")
-    model_q, tokenizer_q, model_c, tokenizer_c = utils.initialize_models(device)
-
+def process_query(query, task_number):
     triage_unit = Triage_Unit()
     specialty_list, expert_list = triage_unit._generate_specialties_list_question(query, utils.medical_specialties_gpt_selected, 5)
-    search_unit = Search_Unit(retrieval_client, retrieve_topk, rerank_topk, allowed_sources, model_q, tokenizer_q, model_c, tokenizer_c, device)
+    search_unit = Search_Unit(retrieval_client, retrieve_topk, rerank_topk, allowed_sources)
     moderation_unit = Moderation_Unit()
     discussion_unit = Discussion_Unit(query, expert_list, search_unit, moderation_unit, llm_debate_max_round)
     discussion_unit._decomposed_rag(query, rewrite, review)
@@ -424,7 +402,7 @@ if __name__ == "__main__":
     oom_count_total = 0
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_index = {executor.submit(process_query, query, task_number, gpu_ids): task_number
+        future_to_index = {executor.submit(process_query, query, task_number): task_number
             for task_number, query in enumerate(queries)
         }
         for future in tqdm(as_completed(future_to_index), total=len(future_to_index), desc="Processing queries"):

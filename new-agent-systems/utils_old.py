@@ -7,38 +7,59 @@ from tqdm import tqdm
 import numpy as np
 import regex as re
 
-device = "cpu"
+def initialize_models(device):
+    model_q = AutoModel.from_pretrained("ncbi/MedCPT-Query-Encoder").to(device)
+    tokenizer_q = AutoTokenizer.from_pretrained("ncbi/MedCPT-Query-Encoder")
 
-model_q = AutoModel.from_pretrained("ncbi/MedCPT-Query-Encoder").to(device)
-tokenizer_q = AutoTokenizer.from_pretrained("ncbi/MedCPT-Query-Encoder")
-model_c = AutoModelForSequenceClassification.from_pretrained("ncbi/MedCPT-Cross-Encoder").to(device)
-tokenizer_c = AutoTokenizer.from_pretrained("ncbi/MedCPT-Cross-Encoder")
+    model_c = AutoModelForSequenceClassification.from_pretrained("ncbi/MedCPT-Cross-Encoder").to(device)
+    tokenizer_c = AutoTokenizer.from_pretrained("ncbi/MedCPT-Cross-Encoder")
 
-def medcpt_query_embedding_function(docs, device='cpu'):
-    encoded = tokenizer_q(docs, truncation=True, padding=True, return_tensors='pt', max_length=512)
-    encoded = {k: v.to(device) for k, v in encoded.items()}
-    with torch.no_grad():
-        embeds = model_q(**encoded).last_hidden_state[:, 0, :]
-        if next(model_q.parameters()).is_cuda:
-            embeds = embeds.cpu()
-        embeds = embeds.numpy()
-    return embeds[0].tolist()
+    return model_q, tokenizer_q, model_c, tokenizer_c
 
-def retrieve_only(query, retrieval_client, allowed_sources = ['cpg_2', 'statpearls_2', 'recop_2', 'textbook_2'], topk=100):
+def retrieve(query, client,topk=100):
+    search_res = client.search(
+    collection_name='rag2',
+    data=[
+        medcpt_query_embedding_function(query)
+    ],  
+    limit=topk,  
+    search_params={"metric_type": "IP", "params": {}},  
+    output_fields=["text", 'source'],  
+    )
+    evidence_list = [result["entity"]["text"] for result in search_res[0][:topk]]
+    return evidence_list
+
+def retrieve_filtered_sources(query, client, allowed_sources = ["source == 'PubMed'", "source == 'PMC'", "source == 'Textbook'", "source == 'CPG'", "source == 'statpearls'", "source == 'recop'", "source == 'textbooks'", "source == 'cpg'"], topk=100):
     evidence_list = []
     query_embedding = medcpt_query_embedding_function(query)
     for source in allowed_sources:
-        search_res = retrieval_client.search(
-            collection_name=source,
-            data=[query_embedding],
+        search_res = client.search(
+            collection_name='rag2',
+            data=[query_embedding               
+            ],  
             limit=topk,  
             search_params={"metric_type": "IP", "params": {}},  
             output_fields=["text", 'source'], 
+            filter = source
             )
         evidence_list.extend([result["entity"]["text"] for result in search_res[0][:topk]])
     return evidence_list
 
-def rerank_only(query, doc_list):
+def medcpt_query_embedding_function(docs):
+    encoded = tokenizer_q(
+        docs,
+        truncation=True,
+        padding=True,
+        return_tensors='pt',
+        max_length=512,
+    )
+    encoded = {k: v.to(device) for k, v in encoded.items()}
+    with torch.no_grad():
+        embeds = model_q(**encoded).last_hidden_state[:, 0, :]
+    embeds = embeds.cpu().numpy()
+    return embeds[0].tolist()
+
+def rerank(query, doc_list):
     pairs = [[query, doc] for doc in doc_list]
     with torch.no_grad():
         encoded = tokenizer_c(
@@ -48,22 +69,11 @@ def rerank_only(query, doc_list):
             return_tensors="pt",
             max_length=512,
         )
-        encoded = {k: v.to('cpu') for k, v in encoded.items()} 
+        encoded = {k: v.to(device) for k, v in encoded.items()} 
         logits = model_c(**encoded).logits.squeeze(dim=1).detach().cpu()
     sorted_indices = torch.argsort(logits, descending=True)
     ranked_docs = [doc_list[i] for i in sorted_indices]
     return ranked_docs
-
-def retrieve(query, retrieval_client, retrieve_topk, rerank_topk):
-    retrieved_docs = retrieve_only(query, retrieval_client, topk=retrieve_topk)
-    reranked_docs = rerank_only(query, retrieved_docs)
-    seen = set()
-    unique_docs = []
-    for doc in reranked_docs[:]:
-        if doc not in seen:
-            seen.add(doc)
-            unique_docs.append(doc)
-    return unique_docs[:rerank_topk]
 
 medical_specialties_gpt_selected = [
     "Internal Medicine",
