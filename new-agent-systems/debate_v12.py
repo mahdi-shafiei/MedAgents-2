@@ -31,13 +31,13 @@ llm_client = AzureOpenAI(
 allowed_sources = ['cpg_2', 'statpearls_2', 'recop_2', 'textbook_2']
 sample_size = 1
 start_idx = 19
-max_workers = 30
+max_workers = 1
 llm_debate_max_round = 1
 retrieve_topk = 100
 rerank_topk = 25
 rewrite=False
 review=False 
-gpu_ids = [0, 1, 2, 3]
+gpu_ids = [0]
 voting = 'singular', # 'multi_ranked', 'multi_rated', 'multi_points'
 
 llm_model = "gpt-4o-mini"
@@ -387,7 +387,7 @@ medqa_test = []
 with open("/data/jiwoong/workspace/MedAgents-2-experiment/datasets/MedQA/hard_medqa/test.jsonl", 'r') as jsfile:
     for line in jsfile:
         medqa_test.append(json.loads(line))
-medqa_test = medqa_test[start_idx:start_idx+sample_size]
+medqa_test = medqa_test[start_idx:star  t_idx+sample_size]
 queries = [f"{test['question']}\n\nOptions: (A) {test['options']['A']} (B) {test['options']['B']} (C) {test['options']['C']} (D) {test['options']['D']}" for test in medqa_test]
 results = [None] * len(queries)
 
