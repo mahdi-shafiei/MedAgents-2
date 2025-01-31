@@ -13,6 +13,8 @@ from datetime import datetime
 from tqdm.auto import tqdm
 import torch
 
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -24,7 +26,7 @@ retrieval_client = MilvusClient(uri="http://localhost:19530")
 
 llm_client = AzureOpenAI(
     azure_endpoint="https://azure-openai-miblab-ncu.openai.azure.com/",
-    api_key=os.getenv("azure_api_key"),
+    api_key=os.getenv("AZURE_API_KEY"),
     api_version="2024-08-01-preview"
 )
 
@@ -200,7 +202,7 @@ class Search_Unit:
                 self.device
                 )
             retrieved_docs.extend(docs[:self.rerank_topk])
-        except:
+        except Exception as e:
             if "memory" in str(e).lower():
                 print('retrieve memory error')
                 self.oom_count += 1
@@ -384,10 +386,10 @@ class Discussion_Unit:
         return answer_by_turns
 
 medqa_test = []
-with open("/data/jiwoong/workspace/MedAgents-2-experiment/datasets/MedQA/hard_medqa/test.jsonl", 'r') as jsfile:
+with open(f"{parent_dir}/data/medqa/test_hard.jsonl", 'r') as jsfile:
     for line in jsfile:
         medqa_test.append(json.loads(line))
-medqa_test = medqa_test[start_idx:star  t_idx+sample_size]
+medqa_test = medqa_test[start_idx:start_idx+sample_size]
 queries = [f"{test['question']}\n\nOptions: (A) {test['options']['A']} (B) {test['options']['B']} (C) {test['options']['C']} (D) {test['options']['D']}" for test in medqa_test]
 results = [None] * len(queries)
 

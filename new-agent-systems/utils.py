@@ -7,12 +7,14 @@ from tqdm import tqdm
 import numpy as np
 import regex as re
 
-device = "cuda:0"
-model_q = AutoModel.from_pretrained("ncbi/MedCPT-Query-Encoder").to(device)
-tokenizer_q = AutoTokenizer.from_pretrained("ncbi/MedCPT-Query-Encoder")
+def initialize_models(device):
+    model_q = AutoModel.from_pretrained("ncbi/MedCPT-Query-Encoder").to(device)
+    tokenizer_q = AutoTokenizer.from_pretrained("ncbi/MedCPT-Query-Encoder")
 
-model_c = AutoModelForSequenceClassification.from_pretrained("ncbi/MedCPT-Cross-Encoder").to(device)
-tokenizer_c = AutoTokenizer.from_pretrained("ncbi/MedCPT-Cross-Encoder")
+    model_c = AutoModelForSequenceClassification.from_pretrained("ncbi/MedCPT-Cross-Encoder").to(device)
+    tokenizer_c = AutoTokenizer.from_pretrained("ncbi/MedCPT-Cross-Encoder")
+
+    return model_q, tokenizer_q, model_c, tokenizer_c
 
 def retrieve(query, client,topk=100):
     search_res = client.search(

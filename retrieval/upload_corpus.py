@@ -8,12 +8,14 @@ import regex as re
 from pymilvus import MilvusClient, DataType
 import argparse
 from tqdm import tqdm
+from typing import List, Dict
 
 parent_dir = os.path.dirname(os.path.abspath(__file__))
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--uri", type=str, default="http://localhost:19530")
     parser.add_argument("--base_dir", type=str, default=parent_dir)
     parser.add_argument("--collection_name", type=str, default="cpg_2")
     parser.add_argument(
@@ -27,13 +29,13 @@ def parse_args():
 
 args = parse_args()
 
-client = MilvusClient(uri="http://localhost:19530")
+client = MilvusClient(uri=args.uri)
 base_dir = args.base_dir
 collection_name = args.collection_name
 corpus_list = args.corpus_list.split(',')
 
 
-def data_upload(client, collection_name, corpus_list=['cpg']):
+def data_upload(client: MilvusClient, collection_name: str, corpus_list: List[str] = ['cpg']):
     global_offset = 0
     batch_size = 10000
 
