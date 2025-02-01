@@ -1,7 +1,11 @@
 openai
-nltk==3.8.1
-rouge-score==0.1.2
-wrapt==1.15.0
-wrapt-timeout-decorator==1.4.0
-jsonlines==4.0.0
-tqdm==4.65.0
+nltk
+rouge-score
+wrapt
+wrapt-timeout-decorator
+jsonlines
+tqdm
+natsort
+regex
+transformers
+pymilvus

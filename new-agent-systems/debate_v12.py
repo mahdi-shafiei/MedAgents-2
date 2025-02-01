@@ -12,6 +12,8 @@ from pymilvus import MilvusClient
 from datetime import datetime
 from tqdm.auto import tqdm
 import torch
+import time
+import argparse
 
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -49,6 +51,7 @@ llm_model = "gpt-4o-mini"
 class LLM_Agent:
     def __init__(self, domain, llm_client, system_prompt = None):
         self.domain = domain
+        self.prompt_usage = {'prompt_tokens': 0, 'completion_tokens': 0}
         if system_prompt is None:
             self.system_prompt = f"You are a medical expert in the domain of {self.domain}."
         else:
@@ -69,10 +72,10 @@ class LLM_Agent:
         if save:
                 self.history.append({'role': 'user', 'content': full_input})
                 self.history.append({'role': 'assistant', 'content': response})
-        print("\n--------------FULL_INPUT--------------")
-        print(full_input)
-        print("\n--------------RESPONSE--------------")
-        print(response)
+        # print("\n--------------FULL_INPUT--------------")
+        # print(full_input)
+        # print("\n--------------RESPONSE--------------")
+        # print(response)
         return response
 
     def _generate_response(self, messages, return_items=None, max_retries=100) :
@@ -94,6 +97,9 @@ class LLM_Agent:
                         max_tokens = 2048,
                         temperature = 0,
                     )
+                # Update token usage
+                self.prompt_usage['prompt_tokens'] += response.usage.prompt_tokens
+                self.prompt_usage['completion_tokens'] += response.usage.completion_tokens
                 return response.choices[0].message.content
             except Exception as e:
                 if "rate" in str(e).lower() or "exceeded" in str(e).lower():
@@ -162,12 +168,14 @@ class Search_Unit:
     def _retrieve_query(self, query) -> List[str]:
         retrieved_docs = []
         try:
-            docs = retrieve(query, retrieval_client, self.retrieve_topk, self.rerank_topk)
+            docs = utils.retrieve(query, retrieval_client, self.retrieve_topk, self.rerank_topk)
             retrieved_docs.extend(docs[:self.rerank_topk])
         except Exception as e:
             if "memory" in str(e).lower():
                 print('retrieve memory error')
                 self.oom_count += 1
+            else:
+                raise e
         return retrieved_docs
 
     def _review_documents(self, query, documents) -> List[str]:
@@ -211,7 +219,7 @@ class Search_Unit:
             f""\
             f"Query: {query}"\
             f"Passage:"
-        return self.query_formulate_agent.chat( )
+        return self.query_formulate_agent.chat(few_shot_prompt)
 
     def get_oom_count(self):
         return self.oom_count
@@ -307,9 +315,9 @@ class Discussion_Unit:
         chat_history_summary = []
         og_documents = '\n'.join(self._request_search(self.question, rewrite=True, review=review))
         for r in range(max_round):
-            print("-"*50)
-            print(f"{r}th round debate start")
-            print("-"*50)
+            # print("-"*50)
+            # print(f"{r}th round debate start")
+            # print("-"*50)
             for i, agent in self.agents.items():
                 if r == 0:
                     user_prompt = f"The following is a multiple-choice question about medical knowledge. Solve this in a step-by-step fashion, starting by summarizing the available information. Output a single option from the given options as the final answer.\n\n"
@@ -364,8 +372,11 @@ class Discussion_Unit:
                 \nHere is the summary of solutions made by previous turn of debate from medical experts: \n\n{chat_history_summary[-1]}\
                 \nPlease think step-by-step and generate your ourput."
             response = self.moderation_unit.decider.chat(decider_prompt, ['Thought', 'Answer'])
-            answer_by_turns.append(json.loads(response)['Answer'].replace('(', '').replace(')', ''))
-        return answer_by_turns
+            answer = json.loads(response)['Answer'].replace('(', '').replace(')', '')
+            answer_by_turns.append(answer)
+        return {
+            'answers': answer_by_turns,
+        }
 
 medqa_test = []
 with open(f"{parent_dir}/data/medqa/test_hard.jsonl", 'r') as jsfile:
@@ -376,61 +387,118 @@ queries = [f"{test['question']}\n\nOptions: (A) {test['options']['A']} (B) {test
 results = [None] * len(queries)
 
 def process_query(query, task_number):
+    # Initialize units
+    start_time = time.time()
     triage_unit = Triage_Unit()
     specialty_list, expert_list = triage_unit._generate_specialties_list_question(query, utils.medical_specialties_gpt_selected, 5)
     search_unit = Search_Unit(retrieval_client, retrieve_topk, rerank_topk, allowed_sources)
     moderation_unit = Moderation_Unit()
     discussion_unit = Discussion_Unit(query, expert_list, search_unit, moderation_unit, llm_debate_max_round)
     discussion_unit._decomposed_rag(query, rewrite, review)
-    results = discussion_unit.simultaneous_talk_summarizer_v2(llm_debate_max_round)
-    return results, search_unit.get_oom_count()
+    discussion_results = discussion_unit.simultaneous_talk_summarizer_v2(llm_debate_max_round)
+
+    # Calculate total token usage across all LLM agents
+    total_usage = {'prompt_tokens': 0, 'completion_tokens': 0}
+    
+    # Collect all LLM agents
+    llm_agents = []
+    llm_agents.extend([triage_unit.question_classifier_agent, triage_unit.option_classifier_agent])
+    llm_agents.extend(expert_list)
+    llm_agents.extend([search_unit.query_formulate_agent, search_unit.document_evaluate_agent])
+    llm_agents.extend([moderation_unit.moderator, moderation_unit.decider])
+
+    # Sum up token usage from all agents
+    for agent in llm_agents:
+        if hasattr(agent, 'prompt_usage'):
+            total_usage['prompt_tokens'] += agent.prompt_usage['prompt_tokens']
+            total_usage['completion_tokens'] += agent.prompt_usage['completion_tokens']
+    end_time = time.time()
+
+    return {
+        'answers': discussion_results['answers'],
+        'token_usage': total_usage,
+        'oom_count': search_unit.get_oom_count(),
+        'time_elapsed': end_time - start_time
+    }
+
+def save_results(results, existing_output_file):
+    results = sorted(results, key=lambda x: x['realidx'])
+    with open(existing_output_file, 'w') as f:
+        json.dump(results, f, indent=4)
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model_name', default='gpt-4o-mini')
+    parser.add_argument('--dataset_name', default='medqa')
+    parser.add_argument('--dataset_dir', default='./data/medqa/')
+    parser.add_argument('--split', default='test')
+    parser.add_argument('--start_pos', type=int, default=0)
+    parser.add_argument('--end_pos', type=int, default=-1)
+    parser.add_argument('--output_files_folder', default='./output/')
+    parser.add_argument('--num_processes', type=int, default=4)
+    parser.add_argument('--method', type=str, default='debate_v12')
+    args = parser.parse_args()
 
-    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    script_name = os.path.splitext(os.path.basename(__file__))[0]
+    # Create output directories
+    os.makedirs(args.output_files_folder, exist_ok=True)
+    subfolder = os.path.join(args.output_files_folder, args.dataset_name)
+    os.makedirs(subfolder, exist_ok=True)
 
-    # Include script name in the output directory
-    output_dir = (
-        f"./output/{script_name}/"
-        f"results_llm_{llm_model}_rounds_{llm_debate_max_round}_retrieve_{retrieve_topk}_"
-        f"rerank_{rerank_topk}_rewrite_{rewrite}_review_{review}_time_{current_time}"
-    )
-    os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(output_dir, exist_ok=True)
+    # Get existing output file
+    existing_output_file = os.path.join(subfolder, f"{args.model_name}-{args.dataset_name}-{args.split}-{args.method}.json")
+    if os.path.exists(existing_output_file):
+        print(f"Existing output file found: {existing_output_file}")
+        with open(existing_output_file, 'r') as f:
+            results = json.load(f)
+        print(f"Loaded {len(results)} results from existing file.")
+    else:
+        results = []
 
-    oom_count_total = 0
+    # Load dataset and set range
+    medqa_test = []
+    with open(f"{args.dataset_dir}/{args.split}_hard.jsonl", 'r') as jsfile:
+        for line in jsfile:
+            medqa_test.append(json.loads(line))
+    
+    end_pos = len(medqa_test) if args.end_pos == -1 else args.end_pos
+    # Get list of already processed IDs and realidxs
+    processed_realidxs = [result.get('realidx', None) for result in results]
+    
+    # Filter out samples that have already been processed
+    medqa_test = [
+        sample for sample in medqa_test[args.start_pos:end_pos]
+        if sample.get('realidx') not in processed_realidxs
+    ]
+    print(f"Processing {len(medqa_test)} samples")
+    queries = [f"{test['question']}\n\nOptions: (A) {test['options']['A']} (B) {test['options']['B']} (C) {test['options']['C']} (D) {test['options']['D']}" for test in medqa_test]
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_index = {executor.submit(process_query, query, task_number): task_number
-            for task_number, query in enumerate(queries)
-        }
-        for future in tqdm(as_completed(future_to_index), total=len(future_to_index), desc="Processing queries"):
-            idx = future_to_index[future]
-            try:
-                result, oom_count = future.result()  
-                results[idx] = result
-                oom_count_total += oom_count
-            except Exception as e:
-                print(f"Error: {str(e)}")
-                results[idx] = f"Error: {str(e)}"  
+    # Run multi-threading
+    with ThreadPoolExecutor(max_workers=args.num_processes) as executor:
+        futures = []
+        try:
+            # Submit tasks to executor
+            future_to_index = {
+                executor.submit(process_query, query, task_number): task_number 
+                for task_number, query in enumerate(queries)
+            }
 
-    print(f"Total OOM errors encountered: {oom_count_total}")
+            for future in tqdm(as_completed(future_to_index), total=len(future_to_index), desc="Processing queries"):
+                idx = future_to_index[future]
+                try:
+                    result = future.result()
+                    result['realidx'] = medqa_test[idx].get('realidx')
+                    result['answer_idx'] = medqa_test[idx]['answer_idx']
+                    results.append(result)
+                except Exception as e:
+                    print(f"Error processing sample {idx}: {e}")
+                    results.append({
+                        'realidx': medqa_test[idx].get('realidx'),
+                        'error': str(e)
+                    })
+                save_results(results, existing_output_file)
 
-    script_name = os.path.splitext(os.path.basename(__file__))[0]
-    with open(os.path.join(output_dir, "results.json"),'w') as jsfile:
-        json.dump(results, jsfile)
-    for debate_round in range(llm_debate_max_round):
-        count = 0
-        for i in range(len(medqa_test)):
-            if results[i][debate_round] == medqa_test[i]['answer_idx']:
-                count += 1
-        print(count/len(medqa_test))
+        except KeyboardInterrupt:
+            print("KeyboardInterrupt: Exiting gracefully.")
 
-
-
-
-
-
-
-
+        finally:
+            save_results(results, existing_output_file)

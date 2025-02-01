@@ -6,15 +6,19 @@ import json
 from tqdm import tqdm
 import numpy as np
 import regex as re
+from logging import getLogger
 
-device = "cpu"
+logger = getLogger(__name__)
+
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 model_q = AutoModel.from_pretrained("ncbi/MedCPT-Query-Encoder").to(device)
 tokenizer_q = AutoTokenizer.from_pretrained("ncbi/MedCPT-Query-Encoder")
 model_c = AutoModelForSequenceClassification.from_pretrained("ncbi/MedCPT-Cross-Encoder").to(device)
 tokenizer_c = AutoTokenizer.from_pretrained("ncbi/MedCPT-Cross-Encoder")
 
-def medcpt_query_embedding_function(docs, device='cpu'):
+def medcpt_query_embedding_function(docs, device=device):
     encoded = tokenizer_q(docs, truncation=True, padding=True, return_tensors='pt', max_length=512)
     encoded = {k: v.to(device) for k, v in encoded.items()}
     with torch.no_grad():
@@ -24,7 +28,7 @@ def medcpt_query_embedding_function(docs, device='cpu'):
         embeds = embeds.numpy()
     return embeds[0].tolist()
 
-def retrieve_only(query, retrieval_client, allowed_sources = ['cpg_2', 'statpearls_2', 'recop_2', 'textbook_2'], topk=100):
+def retrieve_only(query, retrieval_client, allowed_sources = ['cpg_2', 'statpearls_2', 'recop_2', 'textbooks_2'], topk=100):
     evidence_list = []
     query_embedding = medcpt_query_embedding_function(query)
     for source in allowed_sources:
@@ -48,7 +52,7 @@ def rerank_only(query, doc_list):
             return_tensors="pt",
             max_length=512,
         )
-        encoded = {k: v.to('cpu') for k, v in encoded.items()} 
+        encoded = {k: v.to(device) for k, v in encoded.items()} 
         logits = model_c(**encoded).logits.squeeze(dim=1).detach().cpu()
     sorted_indices = torch.argsort(logits, descending=True)
     ranked_docs = [doc_list[i] for i in sorted_indices]
@@ -56,7 +60,9 @@ def rerank_only(query, doc_list):
 
 def retrieve(query, retrieval_client, retrieve_topk, rerank_topk):
     retrieved_docs = retrieve_only(query, retrieval_client, topk=retrieve_topk)
+    logger.info(f"Retrieved docs: {retrieved_docs}")
     reranked_docs = rerank_only(query, retrieved_docs)
+    logger.info(f"Reranked docs: {reranked_docs}")
     seen = set()
     unique_docs = []
     for doc in reranked_docs[:]:
