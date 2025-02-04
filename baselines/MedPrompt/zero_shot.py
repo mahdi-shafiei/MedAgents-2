@@ -7,29 +7,31 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 import argparse
 from pydantic import BaseModel
+import time
 
 load_dotenv()
 
 class AnswerResponse(BaseModel):
     answer_idx: str
 
-answer_schema = {
-    "name": "answer_response",
-    "schema": {
-        "type": "object",
-        "properties": {
-            "answer_idx": {"type": "string"}
-        },
-        "required": ["answer_idx"],
-        "additionalProperties": False
-    },
-    "strict": True
-}
 
 def zero_shot(problem: Dict, client: Any, model: str = "o1-mini", retries: int = 3) -> Dict:
     question_text = problem.get('question', '')
     options = problem.get('options', {})
     options_text = ' '.join([f"({key}) {value}" for key, value in options.items()])
+
+    answer_schema = {
+        "name": "answer_response",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "answer_idx": {"type": "string", "enum": list(options.keys())}
+            },
+            "required": ["answer_idx"],
+            "additionalProperties": False
+        },
+        "strict": True
+    }
 
     # Construct the prompt ensuring a structured JSON output that matches the provided schema.
     prompt = (
@@ -43,24 +45,27 @@ def zero_shot(problem: Dict, client: Any, model: str = "o1-mini", retries: int =
 
     for attempt in range(retries):
         try:
-            if model in ["o3-mini"]:
-                # Step 1: Call the designated model to get an initial answer.
-                completion = client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    response_format={"type": "json_schema", "json_schema": answer_schema}
-                )
-                raw_response = completion.choices[0].message.content.strip()
-                predicted_answer = AnswerResponse.parse_raw(raw_response).answer_idx.strip()
-                usage = completion.usage
-                total_prompt_tokens = usage.prompt_tokens
-                total_completion_tokens = usage.completion_tokens
+            start_time = time.time()
+            # Step 1: Call the designated model to get an initial answer.
+            completion = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                response_format={"type": "json_schema", "json_schema": answer_schema}
+            )
+            raw_response = completion.choices[0].message.content.strip()
+            predicted_answer = AnswerResponse.parse_raw(raw_response).answer_idx.strip()
+            usage = completion.usage
+            total_prompt_tokens = usage.prompt_tokens
+            total_completion_tokens = usage.completion_tokens
+            end_time = time.time()
+            time_elapsed = end_time - start_time
 
             problem['predicted_answer'] = predicted_answer
             problem['token_usage'] = {
                 "prompt_tokens": total_prompt_tokens,
                 "completion_tokens": total_completion_tokens,
             }
+            problem['time_elapsed'] = time_elapsed
             return problem
         except Exception as e:
             print(f"Error on attempt {attempt + 1}: {e}")
