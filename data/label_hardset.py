@@ -150,7 +150,7 @@ def load_jsonl(file_path: str) -> List[Dict]:
     return data
 
 if __name__ == "__main__":
-    test_files = glob.glob('./data/**/*test.jsonl', recursive=True)
+    test_files = glob.glob('../data/**/*test.jsonl', recursive=True)
     for f in test_files:
         print(f'\n{f}')
         
