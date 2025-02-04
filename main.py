@@ -17,19 +17,17 @@ import torch
 from constants import MEDICAL_SPECIALTIES_GPT_SELECTED
 from dotenv import load_dotenv
 from retriever import MedCPTRetriever
+from agent import TriageUnit, SearchUnit, ModerationUnit, DiscussionUnit
 load_dotenv()
 
 FORMAT_INST = "Reply EXACTLY with the following JSON format.\n{format}\nDO NOT MISS ANY REQUEST FIELDS and ensure that your response is a well-formed JSON object!\n"
-
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 def process_query(question, choices, args):
-    device_id = args.gpu_ids[args.task_number % len(args.gpu_ids)]
-    device = torch.device(f"cuda:{device_id}")
     retriever = MedCPTRetriever(device)
-
     triage_unit = TriageUnit(args)
     expert_list = triage_unit.run(question, choices, MEDICAL_SPECIALTIES_GPT_SELECTED, 5)
-    search_unit = SearchUnit(args, retrieval_client, retriever, device)
+    search_unit = SearchUnit(args, retriever, device)
     moderation_unit = ModerationUnit(args)
     discussion_unit = DiscussionUnit(args,expert_list, search_unit, moderation_unit)
     results = discussion_unit.run(question, choices, args.llm_debate_max_round)

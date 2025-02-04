@@ -8,7 +8,7 @@ import numpy as np
 import regex as re
 
 class MedCPTRetriever:
-    def __init__(self, device="cuda:0"):
+    def __init__(self, device="cpu"):
         self.device = device
         self.model_q = AutoModel.from_pretrained("ncbi/MedCPT-Query-Encoder").to(device)
         self.tokenizer_q = AutoTokenizer.from_pretrained("ncbi/MedCPT-Query-Encoder")

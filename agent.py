@@ -237,11 +237,10 @@ class SearchUnit(BaseUnit):
 
     Args:
         args: Arguments containing search configuration
-        retrieval_client: Client for document retrieval
         retriever: Document retrieval system
         device: Compute device to use
     """
-    def __init__(self, args=None, retrieval_client=None, retriever=None, device=None):
+    def __init__(self, args=None, retriever=None, device=None):
         super().__init__(args)
         self.agents = {
             'QueryRewriter': LLMAgent("Query Rewriter", 
@@ -252,7 +251,6 @@ class SearchUnit(BaseUnit):
                 args)
         }
         self.retriever = retriever
-        self.retrieval_client = retrieval_client
         self.device = device
         for attr in ['retrieve_topk', 'rerank_topk', 'allowed_sources']:
             setattr(self, attr, getattr(args, attr))
@@ -273,7 +271,7 @@ class SearchUnit(BaseUnit):
             # First retrieve filtered sources
             retrieved_docs = self.retriever.retrieve_filtered_sources(
                 formatted_query,
-                self.retrieval_client,
+                retrieval_client,
                 self.allowed_sources,
                 self.device,
                 self.retrieve_topk
