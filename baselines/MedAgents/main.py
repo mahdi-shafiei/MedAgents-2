@@ -18,6 +18,12 @@ def process_sample(idx, raw_sample, realqid, handler, args, dataobj):
         gold_answer = raw_sample['answer_idx']
         return fully_decode(idx, realqid, question, options, gold_answer, handler, args, dataobj)
 
+def save_results(results, existing_output_file):
+    results = sorted(results, key=lambda x: x['id'])
+    # Write results in the original order of id
+    with open(existing_output_file, 'w') as f:
+        json.dump(results, f, indent=4)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name', default='gpt-4o')
@@ -66,27 +72,18 @@ if __name__ == '__main__':
     # run multi-threading
     with ThreadPoolExecutor(max_workers=args.num_processes) as executor:
         futures = []
-        try:
-            # Submit tasks to the executor
-            for idx in tqdm.tqdm(test_range, desc=f"{args.start_pos} ~ {end_pos}"):
-                raw_sample = dataobj.get_by_idx(idx)
-                realqid = raw_sample['id']
-                # Submit each fully_decode task to the thread pool
-                futures.append(executor.submit(process_sample, idx, raw_sample, realqid, handler, args, dataobj))
+        # Submit tasks to the executor
+        for idx in tqdm.tqdm(test_range, desc=f"{args.start_pos} ~ {end_pos}"):
+            raw_sample = dataobj.get_by_idx(idx)
+            realqid = raw_sample['id']
+            # Submit each fully_decode task to the thread pool
+            futures.append(executor.submit(process_sample, idx, raw_sample, realqid, handler, args, dataobj))
 
-            for future in tqdm.tqdm(as_completed(futures), total=len(futures), desc="Collecting results"):
-                try:
-                    data_info = future.result()
-                    data_info['realidx'] = raw_sample['realidx']
-                    results.append(data_info)  # Store result with its index
-                except Exception as e:
-                    print(f"Error processing sample: {e}")
-
-        except KeyboardInterrupt:
-            print("KeyboardInterrupt: Exiting gracefully.")
-
-        finally:
-            results = sorted(results, key=lambda x: x['id'])
-            # Write results in the original order of id
-            with open(existing_output_file, 'w') as f:
-                json.dump(results, f, indent=4)
+        for future in tqdm.tqdm(as_completed(futures), total=len(futures), desc="Collecting results"):
+            try:
+                data_info = future.result()
+                data_info['realidx'] = raw_sample['realidx']
+                results.append(data_info)  # Store result with its index
+                save_results(results, existing_output_file)
+            except Exception as e:
+                print(f"Error processing sample: {e}")

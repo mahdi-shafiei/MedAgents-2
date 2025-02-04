@@ -17,6 +17,11 @@ import time
 from dotenv import load_dotenv
 load_dotenv()
 
+def save_results(results, results_path):
+    results = sorted(results, key=lambda x: x['idx'])
+    with open(results_path, 'w') as file:
+        json.dump(results, file, indent=4)
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str, default='medqa')
 parser.add_argument('--dataset_dir', type=str, default='../../data/medqa')
@@ -104,14 +109,15 @@ try:
             for result in tqdm(p.imap(process_sample, new_samples), total=len(new_samples)):
                 if result is not None:
                     results.append(result)
+                    save_results(results, results_path)
     else:
         for no, sample in enumerate(tqdm(new_samples)):
             result = process_sample(sample)
             if result is not None:
                 results.append(result)
+                save_results(results, results_path)
 except KeyboardInterrupt:
     print(f"[ERROR] Processing samples interrupted by user")
 
 finally:
-    with open(results_path, 'w') as file:
-        json.dump(results, file, indent=4)
+    save_results(results, results_path)

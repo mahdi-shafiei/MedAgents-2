@@ -10,7 +10,7 @@
 LOGS_DIR=logs
 DATA_DIR=../../data
 
-for dataset in medqa medmcqa pubmedqa medbullets mmlu-pro mmlu; do
+for dataset in medqa medmcqa pubmedqa medbullets mmlu-pro mmlu afrimedqa; do
     mkdir -p $LOGS_DIR/$dataset
     for model in o3-mini; do
         for split in test_hard; do
