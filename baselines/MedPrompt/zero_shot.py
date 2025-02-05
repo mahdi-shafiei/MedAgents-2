@@ -15,7 +15,7 @@ class AnswerResponse(BaseModel):
     answer_idx: str
 
 
-def zero_shot(problem: Dict, client: Any, model: str = "o1-mini", retries: int = 3) -> Dict:
+def zero_shot(problem: Dict, client: Any, model: str = "o3-mini", retries: int = 3) -> Dict:
     question_text = problem.get('question', '')
     options = problem.get('options', {})
     options_text = ' '.join([f"({key}) {value}" for key, value in options.items()])
@@ -33,37 +33,78 @@ def zero_shot(problem: Dict, client: Any, model: str = "o1-mini", retries: int =
         "strict": True
     }
 
-    # Construct the prompt ensuring a structured JSON output that matches the provided schema.
-    prompt = (
-        "You are a knowledgeable medical assistant. Provide accurate answers to the medical question based on the given information. "
-        "Return your answer as a JSON object that strictly follows the provided schema."
-        f"\nQuestion:\n{question_text}\n\n"
-        f"Options:\n{options_text}"
-    )
-
-    messages = [{"role": "user", "content": prompt}]
+    if model in ["o1-mini", "o3-mini"]:
+        messages = [{
+            "role": "user",
+            "content": (
+                "You are a knowledgeable medical assistant. Provide accurate answers to the medical question based on the given information. "
+                "Given the following question and options, select the correct answer by returning only the answer index (e.g., 'A', 'B', 'C', or 'D').\n\n"
+                f"Question:\n{question_text}\n\n"
+                f"Options:\n{options_text}\n\n"
+                "Reply with the answer index only."
+            )
+        }]
+    else:
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a knowledgeable medical assistant. Provide accurate answers to the medical question based on the given information."
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Given the following question and options, select the correct answer by returning only the answer index (e.g., 'A', 'B', 'C', or 'D').\n\n"
+                    f"Question:\n{question_text}\n\n"
+                    f"Options:\n{options_text}\n\n"
+                    "Reply with the answer index only."
+                )
+            }
+        ]
 
     for attempt in range(retries):
         try:
             start_time = time.time()
-            # Step 1: Call the designated model to get an initial answer.
-            completion = client.chat.completions.create(
-                model=model,
-                messages=messages,
+            # First call: get a direct plain text answer.
+            if model in ["gpt-4o", "gpt-4o-mini"]:
+                completion = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    seed=42,
+                    temperature=0.0
+                )
+            else:
+                completion = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                )
+            raw_response = completion.choices[0].message.content.strip()
+
+            # Second call: use 4o-mini to extract the answer from the generated text.
+            extraction_prompt = (
+                "You are an answer extractor. Extract the answer option from the text below. "
+                "Only return the answer as a JSON object following this format: {\"answer_idx\": \"<option>\"}, "
+                "where <option> is one of the following: " + ", ".join(options.keys()) + "."
+                "\nText:\n" + raw_response
+            )
+            extraction_messages = [{"role": "user", "content": extraction_prompt}]
+            extraction_completion = client_old.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=extraction_messages,
                 response_format={"type": "json_schema", "json_schema": answer_schema}
             )
-            raw_response = completion.choices[0].message.content.strip()
-            predicted_answer = AnswerResponse.parse_raw(raw_response).answer_idx.strip()
-            usage = completion.usage
-            total_prompt_tokens = usage.prompt_tokens
-            total_completion_tokens = usage.completion_tokens
+            extraction_raw_response = extraction_completion.choices[0].message.content.strip()
+            predicted_answer = AnswerResponse.parse_raw(extraction_raw_response).answer_idx.strip()
+
+            # Sum token usage from both calls.
+            usage_first = completion.usage
+
             end_time = time.time()
             time_elapsed = end_time - start_time
 
             problem['predicted_answer'] = predicted_answer
             problem['token_usage'] = {
-                "prompt_tokens": total_prompt_tokens,
-                "completion_tokens": total_completion_tokens,
+                "prompt_tokens": usage_first.prompt_tokens,
+                "completion_tokens": usage_first.completion_tokens,
             }
             problem['time_elapsed'] = time_elapsed
             return problem
@@ -89,10 +130,10 @@ def save_results(results, existing_output_file):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_name', default='o3-mini')
+    parser.add_argument('--model_name', default='o1-mini')
     parser.add_argument('--dataset_name', default='medqa')
-    parser.add_argument('--dataset_dir', default='./data/medqa/')
-    parser.add_argument('--split', default='test')
+    parser.add_argument('--dataset_dir', default='../../data/medqa/')
+    parser.add_argument('--split', default='test_hard')
     parser.add_argument('--start_pos', type=int, default=0)
     parser.add_argument('--end_pos', type=int, default=-1)
     parser.add_argument('--output_files_folder', default='./output/')
@@ -106,7 +147,7 @@ if __name__ == "__main__":
         api_key=os.getenv("AZURE_API_KEY"),
     )
     
-    if args.model_name == "o3-mini":
+    if args.model_name in ["o3-mini", "o1-mini"]:
         client = AzureOpenAI(
             api_version=os.getenv("AZURE_API_VERSION_2"),
             azure_endpoint=os.getenv("AZURE_ENDPOINT_2"),
