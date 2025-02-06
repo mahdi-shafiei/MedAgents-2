@@ -2,7 +2,7 @@ import os
 import json
 from typing import Dict, Any, List
 from tqdm import tqdm
-from openai import AzureOpenAI
+from openai import AzureOpenAI, OpenAI
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 import argparse
@@ -111,7 +111,7 @@ def zero_shot(problem: Dict, client: Any, model: str = "o3-mini", retries: int =
         except Exception as e:
             print(f"Error on attempt {attempt + 1}: {e}")
             if attempt == retries - 1:
-                return problem
+                return None
             continue
 
 def load_jsonl(file_path: str) -> List[Dict]:
@@ -153,6 +153,11 @@ if __name__ == "__main__":
             azure_endpoint=os.getenv("AZURE_ENDPOINT_2"),
             api_key=os.getenv("AZURE_API_KEY_2"),
         )
+    elif args.model_name in ["Qwen/QwQ-32B-Preview", ]:
+        client = OpenAI(
+            base_url="https://api.together.xyz/v1",
+            api_key=os.getenv("TOGETHER_API_KEY"),
+        )
     else:
         client = client_old
 
@@ -184,8 +189,10 @@ if __name__ == "__main__":
         for future in tqdm(as_completed(futures), total=len(futures), desc="Processing problems", unit="problem"):
             try:
                 result = future.result()
-                result.pop('cleanse_cot')
-                result.pop('predicted_answer_base_direct')
+                if result is None:
+                    continue
+                result.pop('cleanse_cot', None)
+                result.pop('predicted_answer_base_direct', None)
                 results.append(result)
                 save_results(results, existing_output_file)
             except Exception as e:
