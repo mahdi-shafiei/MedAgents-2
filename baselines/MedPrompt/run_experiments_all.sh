@@ -13,11 +13,12 @@ DATA_DIR=../../data
 for dataset in medqa medmcqa pubmedqa medbullets mmlu-pro mmlu afrimedqa; do
     {
         mkdir -p $LOGS_DIR/$dataset
-        for model in gpt-4o-mini gpt-4o o1-mini o3-mini; do
-            for split in test; do
+        for model in claude-3-5-haiku claude-3-5-sonnet; do
+            for split in test test_hard; do
                 echo "Running $model on $dataset $split"
-                log_file=$LOGS_DIR/$dataset/${model}_${dataset}_${split}.log
-                error_file=$LOGS_DIR/$dataset/${model}_${dataset}_${split}.err
+                model_filename=$(echo $model | tr '/' '_')
+                log_file=$LOGS_DIR/$dataset/${model_filename}_${dataset}_${split}.log
+                error_file=$LOGS_DIR/$dataset/${model_filename}_${dataset}_${split}.err
                 python zero_shot.py --dataset_name $dataset --dataset_dir $DATA_DIR/$dataset/ --split $split --model $model --output_files_folder ./output/ --num_processes 4 > $log_file 2> $error_file
             done
         done

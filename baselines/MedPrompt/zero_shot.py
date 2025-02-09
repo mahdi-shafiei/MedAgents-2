@@ -3,6 +3,7 @@ import json
 from typing import Dict, Any, List
 from tqdm import tqdm
 from openai import AzureOpenAI, OpenAI
+from anthropic import AnthropicBedrock
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 import argparse
@@ -14,6 +15,10 @@ load_dotenv()
 class AnswerResponse(BaseModel):
     answer_idx: str
 
+ANTHROPIC_MODELS = {
+    "claude-3-5-sonnet": "anthropic.claude-3-5-sonnet-20240620-v1:0",
+    "claude-3-5-haiku": "anthropic.claude-3-5-haiku-20241022-v1:0"
+}
 
 def zero_shot(problem: Dict, client: Any, model: str = "o3-mini", retries: int = 3) -> Dict:
     question_text = problem.get('question', '')
@@ -33,7 +38,7 @@ def zero_shot(problem: Dict, client: Any, model: str = "o3-mini", retries: int =
         "strict": True
     }
 
-    if model in ["o1-mini", "o3-mini"]:
+    if model in ["o1-mini", "o3-mini", "claude-3-5-sonnet", "claude-3-5-haiku"]:
         messages = [{
             "role": "user",
             "content": (
@@ -65,19 +70,28 @@ def zero_shot(problem: Dict, client: Any, model: str = "o3-mini", retries: int =
         try:
             start_time = time.time()
             # First call: get a direct plain text answer.
-            if model in ["gpt-4o", "gpt-4o-mini"]:
+            if model in ["claude-3-5-sonnet", "claude-3-5-haiku"]:
+                completion = client.messages.create(
+                    model=ANTHROPIC_MODELS[model],
+                    messages=messages,
+                    temperature=0.0,
+                    max_tokens=4096
+                )
+                raw_response = completion.content[0].text
+            elif model in ["o1-mini", "o3-mini"]:
+                completion = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                )
+                raw_response = completion.choices[0].message.content.strip()
+            else:
                 completion = client.chat.completions.create(
                     model=model,
                     messages=messages,
                     seed=42,
                     temperature=0.0
                 )
-            else:
-                completion = client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                )
-            raw_response = completion.choices[0].message.content.strip()
+                raw_response = completion.choices[0].message.content.strip()
 
             # Second call: use 4o-mini to extract the answer from the generated text.
             extraction_prompt = (
@@ -97,14 +111,20 @@ def zero_shot(problem: Dict, client: Any, model: str = "o3-mini", retries: int =
 
             # Sum token usage from both calls.
             usage_first = completion.usage
+            if model in ["claude-3-5-sonnet", "claude-3-5-haiku"]:
+                prompt_tokens = usage_first.input_tokens
+                completion_tokens = usage_first.output_tokens
+            else:
+                prompt_tokens = usage_first.prompt_tokens
+                completion_tokens = usage_first.completion_tokens
 
             end_time = time.time()
             time_elapsed = end_time - start_time
 
             problem['predicted_answer'] = predicted_answer
             problem['token_usage'] = {
-                "prompt_tokens": usage_first.prompt_tokens,
-                "completion_tokens": usage_first.completion_tokens,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
             }
             problem['time_elapsed'] = time_elapsed
             return problem
@@ -130,7 +150,7 @@ def save_results(results, existing_output_file):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_name', default='o1-mini')
+    parser.add_argument('--model_name', default='claude-3-5-haiku')
     parser.add_argument('--dataset_name', default='medqa')
     parser.add_argument('--dataset_dir', default='../../data/medqa/')
     parser.add_argument('--split', default='test_hard')
@@ -153,10 +173,16 @@ if __name__ == "__main__":
             azure_endpoint=os.getenv("AZURE_ENDPOINT_2"),
             api_key=os.getenv("AZURE_API_KEY_2"),
         )
-    elif args.model_name in ["Qwen/QwQ-32B-Preview", ]:
+    elif args.model_name in ["Qwen/QwQ-32B-Preview", "deepseek-ai/DeepSeek-R1", "deepseek-ai/DeepSeek-V3", "meta-llama/Llama-3.3-70B-Instruct-Turbo"]:
         client = OpenAI(
             base_url="https://api.together.xyz/v1",
             api_key=os.getenv("TOGETHER_API_KEY"),
+        )
+    elif args.model_name in ["claude-3-5-sonnet", "claude-3-5-haiku"]:
+        client = AnthropicBedrock(
+            aws_region=os.getenv("AWS_REGION"),
+            aws_access_key=os.getenv("AWS_API_KEY"),
+            aws_secret_key=os.getenv("AWS_SECRET_KEY"),
         )
     else:
         client = client_old
@@ -164,7 +190,7 @@ if __name__ == "__main__":
     os.makedirs(args.output_files_folder, exist_ok=True)
     subfolder = os.path.join(args.output_files_folder, args.dataset_name)
     os.makedirs(subfolder, exist_ok=True)
-    existing_output_file = os.path.join(args.output_files_folder, args.dataset_name, f"{args.model_name}-{args.dataset_name}-{args.split}-zero_shot.json")
+    existing_output_file = os.path.join(args.output_files_folder, args.dataset_name, f"{args.model_name.split('/')[-1]}-{args.dataset_name}-{args.split}-zero_shot.json")
     
     if os.path.exists(existing_output_file):
         print(f"Existing output file found: {existing_output_file}")
