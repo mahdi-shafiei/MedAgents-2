@@ -89,8 +89,9 @@ def process_sample(sample):
         time_end = time.time()
         return {
             'idx': sample['realidx'],
+            'realidx': sample['realidx'],
             'question': question,
-            'label': sample['answer_idx'],
+            'answer_idx': sample['answer_idx'],
             'answer': sample['answer'],
             'options': sample['options'],
             'predicted_answer': final_decision['answer'],

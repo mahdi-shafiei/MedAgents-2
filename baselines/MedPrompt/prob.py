@@ -21,6 +21,26 @@ ANTHROPIC_MODELS = {
     "claude-3-5-haiku": "anthropic.claude-3-5-haiku-20241022-v1:0"
 }
 
+
+def levenshtein_distance(s1, s2):
+    if len(s1) < len(s2):
+        return levenshtein_distance(s2, s1)
+
+    if len(s2) == 0:
+        return len(s1)
+
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+
+    return previous_row[-1]
+
 def split_and_generate(problem: dict, client: Any, model: str = "o3-mini") -> tuple[str, str, str]:
     """Split question and generate completion for memorization analysis.
     
@@ -36,52 +56,58 @@ def split_and_generate(problem: dict, client: Any, model: str = "o3-mini") -> tu
     options = problem.get('options', {})
     tokenizer = encoding_for_model("gpt-4o-mini")
 
-    # Split question into halves
-    tokens = tokenizer.encode(question_text)
-    mid_token = len(tokens) // 2
-    q1_tokens = tokens[:mid_token]
-    q2_tokens = tokens[mid_token:]
-    q1 = tokenizer.decode(q1_tokens)
-    q2 = tokenizer.decode(q2_tokens)
+    if 'q1' in problem and 'q2' in problem and 'generated_text' in problem:
+        q1 = problem['q1']
+        q2 = problem['q2']
+        generated_text = problem['generated_text']
+    else:
+        # Split question into halves
+        tokens = tokenizer.encode(question_text)
+        mid_token = len(tokens) // 2
+        q1_tokens = tokens[:mid_token]
+        q2_tokens = tokens[mid_token:]
+        q1 = tokenizer.decode(q1_tokens)
+        q2 = tokenizer.decode(q2_tokens)
 
-    try:
-        if model in ["claude-3-5-sonnet", "claude-3-5-haiku"]:
-            completion = client.messages.create(
-                model=ANTHROPIC_MODELS[model],
-                messages=[{"role": "assistant", "content": q1.strip()}],
-                temperature=0.0,
-                max_tokens=len(q2_tokens)
-            )
-            generated_text = completion.content[0].text
-        elif model in ["o1-mini", "o3-mini"]:
-            completion = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "assistant", "content": q1.strip()}],
-                # max_tokens=len(q2_tokens)
-            )
-            generated_text = completion.choices[0].message.content.strip()
-            tokenized_generated_text = tokenizer.encode(generated_text)
-            if len(tokenized_generated_text) > len(q2_tokens):
-                generated_text = tokenizer.decode(tokenized_generated_text[:len(q2_tokens)])
-        else:
-            completion = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "assistant", "content": q1.strip()}],
-                seed=42,
-                temperature=0.0,
-                max_tokens=len(q2_tokens)
-            )
-            generated_text = completion.choices[0].message.content.strip()
+        try:
+            if model in ["claude-3-5-sonnet", "claude-3-5-haiku"]:
+                completion = client.messages.create(
+                    model=ANTHROPIC_MODELS[model],
+                    messages=[{"role": "assistant", "content": q1.strip()}],
+                    temperature=0.0,
+                    max_tokens=len(q2_tokens)
+                )
+                generated_text = completion.content[0].text
+            elif model in ["o1-mini", "o3-mini"]:
+                completion = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "assistant", "content": q1.strip()}],
+                    # max_tokens=len(q2_tokens)
+                )
+                generated_text = completion.choices[0].message.content.strip()
+                tokenized_generated_text = tokenizer.encode(generated_text)
+                if len(tokenized_generated_text) > len(q2_tokens):
+                    generated_text = tokenizer.decode(tokenized_generated_text[:len(q2_tokens)])
+            else:
+                completion = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "assistant", "content": q1.strip()}],
+                    seed=42,
+                    temperature=0.0,
+                    max_tokens=len(q2_tokens)
+                )
+                generated_text = completion.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"Error generating text: {e}")
+            return None
             
         return {
             **problem,
             'q1': q1,
             'q2': q2,
-            'generated_text': generated_text
+            'generated_text': generated_text,
+            'levenshtein_distance': levenshtein_distance(q2, generated_text)
         }
-    except Exception as e:
-        print(f"Error generating completion: {e}")
-        return None
 
 def load_jsonl(file_path: str) -> List[Dict]:
     data = []
