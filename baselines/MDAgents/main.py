@@ -93,11 +93,10 @@ def process_sample(sample):
             'label': sample['answer_idx'],
             'answer': sample['answer'],
             'options': sample['options'],
-            'response': final_decision['majority'],
-            'prediction': final_decision['answer'],
+            'predicted_answer': final_decision['answer'],
             'difficulty': difficulty,
-            'total_usage': total_usage,
-            'total_time': time_end - time_start
+            'token_usage': total_usage,
+            'time_elapsed': time_end - time_start
         }
     except Exception as e:
         print(f"[ERROR] Processing sample {sample['realidx']} failed: {e}")

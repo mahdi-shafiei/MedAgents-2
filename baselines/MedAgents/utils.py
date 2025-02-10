@@ -135,23 +135,16 @@ def fully_decode(qid, realqid, question, options, gold_answer, handler, args, da
 
     data_info = {
         'id':qid,
+        'realidx': realqid,
         'question': question,
         'options': options,
-        'pred_answer': ans,
-        'gold_answer': gold_answer,
-        'question_domains': question_domains,
-        'option_domains': options_domains,
-        'question_analyses': question_analyses,
-        'option_analyses': option_analyses,
-        'syn_report': syn_report,
-        'vote_history': vote_history,
-        'revision_history': revision_history,
-        'syn_repo_history': syn_repo_history,
-        'raw_output': output,
-        'total_prompt_tokens': total_prompt_tokens,
-        'total_completion_tokens': total_completion_tokens,
-        'total_tokens': total_prompt_tokens + total_completion_tokens,
-        'total_time': total_time
+        'predicted_answer': ans,
+        'answer_idx': gold_answer,
+        'token_usage': {
+            "prompt_tokens": total_prompt_tokens,
+            "completion_tokens": total_completion_tokens,
+        },
+        'time_elapsed': total_time
     }
     
     return data_info
