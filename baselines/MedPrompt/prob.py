@@ -148,6 +148,12 @@ if __name__ == "__main__":
             azure_endpoint=os.getenv("AZURE_ENDPOINT_2"),
             api_key=os.getenv("AZURE_API_KEY_2"),
         )
+    elif args.model_name in ["gpt-35-turbo"]:
+        client = AzureOpenAI(
+            api_version=os.getenv("AZURE_API_VERSION_3"),
+            azure_endpoint=os.getenv("AZURE_ENDPOINT_3"),
+            api_key=os.getenv("AZURE_API_KEY_3"),
+        )
     elif args.model_name in ["Qwen/QwQ-32B-Preview", "deepseek-ai/DeepSeek-R1", "deepseek-ai/DeepSeek-V3", "meta-llama/Llama-3.3-70B-Instruct-Turbo"]:
         client = OpenAI(
             base_url="https://api.together.xyz/v1",
