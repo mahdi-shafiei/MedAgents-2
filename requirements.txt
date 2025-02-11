@@ -9,3 +9,11 @@ natsort
 regex
 transformers
 pymilvus
+tabulate
+anthropic
+prettytable
+tiktoken
+matplotlib
+pandas
+seaborn
+datasets

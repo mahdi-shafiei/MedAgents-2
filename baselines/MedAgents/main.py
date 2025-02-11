@@ -82,7 +82,6 @@ if __name__ == '__main__':
         for future in tqdm.tqdm(as_completed(futures), total=len(futures), desc="Collecting results"):
             try:
                 data_info = future.result()
-                data_info['realidx'] = raw_sample['realidx']
                 results.append(data_info)  # Store result with its index
                 save_results(results, existing_output_file)
             except Exception as e:

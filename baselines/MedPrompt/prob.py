@@ -70,37 +70,55 @@ def split_and_generate(problem: dict, client: Any, model: str = "o3-mini") -> tu
         q2 = tokenizer.decode(q2_tokens)
 
         try:
-            if model in ["claude-3-5-sonnet", "claude-3-5-haiku"]:
-                completion = client.messages.create(
-                    model=ANTHROPIC_MODELS[model],
-                    messages=[{"role": "assistant", "content": q1.strip()}],
-                    temperature=0.0,
-                    max_tokens=len(q2_tokens)
-                )
-                generated_text = completion.content[0].text
-            elif model in ["o1-mini", "o3-mini"]:
-                completion = client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "assistant", "content": q1.strip()}],
-                    # max_tokens=len(q2_tokens)
-                )
-                generated_text = completion.choices[0].message.content.strip()
-                tokenized_generated_text = tokenizer.encode(generated_text)
-                if len(tokenized_generated_text) > len(q2_tokens):
-                    generated_text = tokenizer.decode(tokenized_generated_text[:len(q2_tokens)])
-            else:
-                completion = client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "assistant", "content": q1.strip()}],
-                    seed=42,
-                    temperature=0.0,
-                    max_tokens=len(q2_tokens)
-                )
-                generated_text = completion.choices[0].message.content.strip()
+            generated_text = ""
+            max_retries = 10
+            retries = 0
+            while not generated_text and retries < max_retries:
+                if model in ["claude-3-5-sonnet", "claude-3-5-haiku"]:
+                    completion = client.messages.create(
+                        model=ANTHROPIC_MODELS[model],
+                        messages=[{"role": "assistant", "content": q1.strip()}],
+                        temperature=0.0,
+                        max_tokens=len(q2_tokens)
+                    )
+                    try:
+                        generated_text = completion.content[0].text
+                    except:
+                        generated_text = ""
+                        q1 = tokenizer.decode(q1_tokens[:-1])
+                        q2 = tokenizer.decode([q1_tokens[-1]] + q2_tokens)
+                elif model in ["o1-mini", "o3-mini"]:
+                    completion = client.chat.completions.create(
+                        model=model,
+                        messages=[{"role": "assistant", "content": q1.strip()}],
+                        # max_tokens=len(q2_tokens)
+                    )
+                    generated_text = completion.choices[0].message.content.strip()
+                    tokenized_generated_text = tokenizer.encode(generated_text)
+                    if len(tokenized_generated_text) > len(q2_tokens):
+                        generated_text = tokenizer.decode(tokenized_generated_text[:len(q2_tokens)])
+                    if not generated_text:
+                        q1 = tokenizer.decode(q1_tokens[:-1])
+                        q2 = tokenizer.decode([q1_tokens[-1]] + q2_tokens)
+                else:
+                    completion = client.chat.completions.create(
+                        model=model,
+                        messages=[{"role": "assistant", "content": q1.strip()}],
+                        seed=42,
+                        temperature=0.0,
+                        max_tokens=len(q2_tokens)
+                    )
+                    try:
+                        generated_text = completion.choices[0].message.content.strip()
+                    except:
+                        generated_text = ""
+                        q1 = tokenizer.decode(q1_tokens[:-1])
+                        q2 = tokenizer.decode([q1_tokens[-1]] + q2_tokens)
+                retries += 1
         except Exception as e:
             print(f"Error generating text: {e}")
             return None
-            
+                
         return {
             **problem,
             'q1': q1,
