@@ -12,46 +12,45 @@ import time
 
 load_dotenv()
 
-class AnswerResponse(BaseModel):
-    thinking: str
-    answer_idx: str
-
+# Define Anthropic models mapping used for certain models.
 ANTHROPIC_MODELS = {
     "claude-3-5-sonnet": "anthropic.claude-3-5-sonnet-20240620-v1:0",
     "claude-3-5-haiku": "anthropic.claude-3-5-haiku-20241022-v1:0"
 }
 
-def run_cot(question_text: str, options_text: str, client: Any, model: str) -> tuple[Any, str]:
-    """Call LLM to get initial answer"""
-    if model in ["o1-mini", "o3-mini", "claude-3-5-sonnet", "claude-3-5-haiku"]:
-        messages = [{
-            "role": "user", 
-            "content": (
-                "You are a helpful medical expert. Your task is to answer a multi-choice medical question. "
-                "Please first think step-by-step and then choose the answer from the provided options. "
-                "Your responses will be used for research purposes only, so please have a definite answer (e.g., 'A', 'B', 'C', etc.).\n\n"
-                f"Question:\n{question_text}\n\n"
-                f"Options:\n{options_text}\n\n"
-            )
-        }]
-    else:
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful medical expert. Your task is to answer multi-choice medical questions by thinking step-by-step and providing clear explanations."
-            },
-            {
-                "role": "user",
-                "content": (
-                    "Please answer this medical question by first thinking step-by-step and then choosing from the provided options. "
-                    "Your responses will be used for research purposes only, so please have a definite answer (e.g., 'A', 'B', 'C', etc.).\n\n"
-                    f"Question:\n{question_text}\n\n"
-                    f"Options:\n{options_text}\n\n"
-                )
-            }
-        ]
+# Prompt templates for the multipersona debate process.
+DEBATE_INITIAL_PROMPT = (
+    "You are a {role}. Based on your medical expertise, please analyze the following question and options. "
+    "Think step-by-step and provide your reasoning and answer clearly. "
+    "Please include distinct sections for your thinking and your answer (e.g. 'A', 'B', 'C', etc.) in your response.\n\n"
+    "Question:\n{question}\n\n"
+    "Options:\n{options}\n"
+)
 
+DEBATE_PROMPT = (
+    "You are a {role}. Considering the following insights from your peers:\n{context}\n\n"
+    "Please update your analysis for the question below. "
+    "Think carefully step-by-step and revise your answer accordingly. "
+    "Provide your response with clear sections for your updated thinking and updated answer (e.g. 'A', 'B', 'C', etc.).\n\n"
+    "Question:\n{question}\n\n"
+    "Options:\n{options}\n"
+)
+
+FINAL_DECISION_PROMPT = (
+    "You are a senior medical expert. Considering all the following debate insights and answers:\n\n"
+    "{all_thinking}\n\n"
+    "{all_answers}\n\n"
+    "Please carefully review all the information and provide the final decision. "
+    "Offer a detailed rationale and clearly state your final answer, indicating your final reasoning and the chosen option (e.g. 'A', 'B', 'C', etc.). "
+    "Note: the final answer should be a single letter corresponding to one of the options.\n\n"
+    "Question:\n{question}\n\n"
+    "Options:\n{options}\n"
+)
+
+# Helper function to call the LLM with a given prompt.
+def call_llm(prompt: str, client: Any, model: str) -> tuple:
     if model in ["claude-3-5-sonnet", "claude-3-5-haiku"]:
+        messages = [{"role": "user", "content": prompt}]
         completion = client.messages.create(
             model=ANTHROPIC_MODELS[model],
             messages=messages,
@@ -60,12 +59,14 @@ def run_cot(question_text: str, options_text: str, client: Any, model: str) -> t
         )
         raw_response = completion.content[0].text
     elif model in ["o1-mini", "o3-mini"]:
+        messages = [{"role": "user", "content": prompt}]
         completion = client.chat.completions.create(
             model=model,
             messages=messages,
         )
         raw_response = completion.choices[0].message.content.strip()
     else:
+        messages = [{"role": "user", "content": prompt}]
         completion = client.chat.completions.create(
             model=model,
             messages=messages,
@@ -73,8 +74,11 @@ def run_cot(question_text: str, options_text: str, client: Any, model: str) -> t
             temperature=0.0
         )
         raw_response = completion.choices[0].message.content.strip()
-
     return completion, raw_response
+
+class AnswerResponse(BaseModel):
+    thinking: str
+    answer_idx: str
 
 def parse_answer(raw_response: str, options: Dict, client_old: Any) -> str:
     """Parse LLM response using GPT-4o-mini"""
@@ -108,45 +112,104 @@ def parse_answer(raw_response: str, options: Dict, client_old: Any) -> str:
     result = AnswerResponse.parse_raw(extraction_raw_response)
     return result.thinking, result.answer_idx
 
-def run(problem: Dict, client: Any, model: str = "o3-mini", retries: int = 3) -> Dict:
+# Multipersona debate-based problem solver.
+def run(problem: Dict, client: Any, model: str = "o3-mini", retries: int = 3, num_rounds: int = 2) -> Dict:
     question_text = problem.get('question', '')
     options = problem.get('options', {})
     options_text = ' '.join([f"({key}) {value}" for key, value in options.items()])
+    prompt_tokens, completion_tokens = 0, 0
+    start_time = time.time()
+    
+    # Define debate agent roles (adapted for the medical domain)
+    debate_roles = [
+        "Innovative Medical Thinker - MD",
+        "Critical Medical Analyst - Medical Professor",
+        "Clinical Decision Specialist - Medical Researcher"
+    ]
+    
+    rounds_thinking = []  # For storing each agent's thinking per round.
+    rounds_answers = []   # For storing each agent's answer per round.
 
-    for attempt in range(retries):
-        try:
-            start_time = time.time()
-            
-            # First call: get direct answer from LLM
-            completion, raw_response = run_cot(question_text, options_text, client, model)
-            
-            # Second call: parse answer using GPT-4o-mini
-            thinking, predicted_answer = parse_answer(raw_response, options, client_old)
-
-            # Calculate token usage
-            usage_first = completion.usage
-            if model in ["claude-3-5-sonnet", "claude-3-5-haiku"]:
-                prompt_tokens = usage_first.input_tokens
-                completion_tokens = usage_first.output_tokens
+    for r in range(num_rounds):
+        current_thinking = []
+        current_answers = []
+        for i, role in enumerate(debate_roles):
+            if r == 0:
+                prompt = DEBATE_INITIAL_PROMPT.format(
+                    role=role,
+                    question=question_text,
+                    options=options_text
+                )
             else:
-                prompt_tokens = usage_first.prompt_tokens
-                completion_tokens = usage_first.completion_tokens
-
-            end_time = time.time()
-            time_elapsed = end_time - start_time
-
-            problem['predicted_answer'] = predicted_answer
-            problem['token_usage'] = {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-            }
-            problem['time_elapsed'] = time_elapsed
-            return problem
-        except Exception as e:
-            print(f"Error on attempt {attempt + 1}: {e}")
-            if attempt == retries - 1:
-                return None
-            continue
+                # Build context using other agents' previous round thinking.
+                context_items = []
+                for j, other_role in enumerate(debate_roles):
+                    if j != i:
+                        context_items.append(f"{other_role}'s previous thinking: {rounds_thinking[r-1][j]}")
+                context_text = "\n".join(context_items)
+                prompt = DEBATE_PROMPT.format(
+                    role=role,
+                    context=context_text,
+                    question=question_text,
+                    options=options_text
+                )
+            try:
+                completion, raw_response = call_llm(prompt, client, model)
+                usage = completion.usage
+                if model in ["claude-3-5-sonnet", "claude-3-5-haiku"]:
+                    prompt_tokens += usage.input_tokens
+                    completion_tokens += usage.output_tokens
+                else:
+                    prompt_tokens += usage.prompt_tokens
+                    completion_tokens += usage.completion_tokens
+            except Exception as e:
+                print(f"Error during LLM call for role {role} in round {r+1}: {e}")
+                continue
+            thinking, answer = parse_answer(raw_response, options, client_old)
+            current_thinking.append(thinking)
+            current_answers.append(answer)
+        rounds_thinking.append(current_thinking)
+        rounds_answers.append(current_answers)
+    
+    # Final decision phase using aggregated debate outcomes.
+    final_thinking_context = "\n".join([
+        f"{debate_roles[i]}'s final thinking: {rounds_thinking[-1][i]}" for i in range(len(debate_roles))
+    ])
+    final_answers_context = "\n".join([
+        f"{debate_roles[i]}'s final answer: {rounds_answers[-1][i]}" for i in range(len(debate_roles))
+    ])
+    final_prompt = FINAL_DECISION_PROMPT.format(
+        question=question_text,
+        options=options_text,
+        all_thinking=final_thinking_context,
+        all_answers=final_answers_context
+    )
+    try:
+        final_completion, final_raw = call_llm(final_prompt, client, model)
+        usage_final = final_completion.usage
+        if model in ["claude-3-5-sonnet", "claude-3-5-haiku"]:
+            prompt_tokens += usage_final.input_tokens
+            completion_tokens += usage_final.output_tokens
+        else:
+            prompt_tokens += usage_final.prompt_tokens
+            completion_tokens += usage_final.completion_tokens
+    except Exception as e:
+        print(f"Error during final LLM call: {e}")
+        return None
+    thinking, answer = parse_answer(final_raw, options, client_old)
+    predicted_answer = answer
+    final_thinking = thinking
+    
+    end_time = time.time()
+    time_elapsed = end_time - start_time
+    
+    problem['predicted_answer'] = predicted_answer
+    problem['token_usage'] = {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+    }
+    problem['time_elapsed'] = time_elapsed
+    return problem
 
 def load_jsonl(file_path: str) -> List[Dict]:
     data = []
@@ -168,10 +231,12 @@ if __name__ == "__main__":
     parser.add_argument('--dataset_name', default='medqa')
     parser.add_argument('--dataset_dir', default='../../data/medqa/')
     parser.add_argument('--split', default='test_hard')
+    parser.add_argument('--num_rounds', type=int, default=2)
     parser.add_argument('--start_pos', type=int, default=0)
     parser.add_argument('--end_pos', type=int, default=-1)
     parser.add_argument('--output_files_folder', default='./output/')
     parser.add_argument('--num_processes', type=int, default=4)
+    parser.add_argument('--retries', type=int, default=3)
 
     args = parser.parse_args()
     
@@ -204,7 +269,11 @@ if __name__ == "__main__":
     os.makedirs(args.output_files_folder, exist_ok=True)
     subfolder = os.path.join(args.output_files_folder, args.dataset_name)
     os.makedirs(subfolder, exist_ok=True)
-    existing_output_file = os.path.join(args.output_files_folder, args.dataset_name, f"{args.model_name.split('/')[-1]}-{args.dataset_name}-{args.split}-cot.json")
+    existing_output_file = os.path.join(
+        args.output_files_folder,
+        args.dataset_name,
+        f"{args.model_name.split('/')[-1]}-{args.dataset_name}-{args.split}-multipersona-{args.num_rounds}.json"
+    )
     
     if os.path.exists(existing_output_file):
         print(f"Existing output file found: {existing_output_file}")
@@ -225,7 +294,8 @@ if __name__ == "__main__":
     print(f"Processing {len(problems_to_process)} problems out of {len(problems)} total problems.")
 
     with ThreadPoolExecutor(max_workers=args.num_processes) as executor:
-        futures = {executor.submit(run, problem, client, args.model_name): problem for problem in problems_to_process}
+        # Using 2 rounds for multipersona debate; ignore the old num_solutions parameter.
+        futures = {executor.submit(run, problem, client, args.model_name, args.retries, args.num_rounds): problem for problem in problems_to_process}
         for future in tqdm(as_completed(futures), total=len(futures), desc="Processing problems", unit="problem"):
             try:
                 result = future.result()

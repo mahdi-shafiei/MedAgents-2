@@ -13,7 +13,6 @@ import time
 load_dotenv()
 
 class AnswerResponse(BaseModel):
-    thinking: str
     answer_idx: str
 
 ANTHROPIC_MODELS = {
@@ -76,6 +75,72 @@ def run_cot(question_text: str, options_text: str, client: Any, model: str) -> t
 
     return completion, raw_response
 
+def ensemble_solutions(problem: Dict, solutions: List[str], client: Any, model: str) -> str:
+    """
+    Ensemble multiple chain-of-thought responses to identify the most consistent solution.
+    """
+    question_text = problem.get('question', '')
+    options_text = ' '.join([f"({key}) {value}" for key, value in problem.get('options', {}).items()])
+    solutions_text = '\n'.join([f"Solution {i+1}:\n{solution}" for i, solution in enumerate(solutions)])
+    if model in ["o1-mini", "o3-mini"]:
+        messages = [
+            {
+                "role": "user",
+                "content": (
+                    "You are a helpful medical expert. Your task is to answer a multi-choice medical question. "
+                    "Given the question described as follows:\n"
+                    "Question: {question}\n"
+                    "Options: {options}\n\n"
+                    "Several solutions have been generated to address the given question. They are as follows:\n"
+                    "{solutions}\n\n"
+                    "Carefully evaluate these solutions and identify the answer that appears most frequently across them. This consistency in answers is crucial for determining the most reliable solution.\n"
+                    "Provide a detailed explanation of your thought process, and output only the single letter ID (A, B, C, etc.) corresponding to the most consistent solution.".format(question=question_text, options=options_text, solutions=solutions_text)
+                )
+            }
+        ]
+    else:
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a helpful medical expert. Your task is to answer a multi-choice medical question. "
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Given the question described as follows:\n"
+                    "Question: {question}\n"
+                    "Options: {options}\n\n"
+                    "Several solutions have been generated to address the given question. They are as follows:\n"
+                    "{solutions}\n\n"
+                    "Carefully evaluate these solutions and identify the answer that appears most frequently across them. This consistency in answers is crucial for determining the most reliable solution.\n"
+                    "Provide a detailed explanation of your thought process, and output only the single letter ID (A, B, C, etc.) corresponding to the most consistent solution.".format(question=question_text, options=options_text, solutions=solutions_text)
+                )
+            }
+        ]
+    if model in ["claude-3-5-sonnet", "claude-3-5-haiku"]:
+        completion = client.messages.create(
+            model=ANTHROPIC_MODELS[model],
+            messages=messages,
+            temperature=0.0,
+            max_tokens=4096
+        )
+        raw_response = completion.content[0].text
+    elif model in ["o1-mini", "o3-mini"]:
+        completion = client.chat.completions.create(
+            model=model,
+            messages=messages,
+        )
+        raw_response = completion.choices[0].message.content.strip()
+    else:
+        completion = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            seed=42,
+            temperature=0.0
+        )
+        raw_response = completion.choices[0].message.content.strip()
+    return completion, raw_response
+
 def parse_answer(raw_response: str, options: Dict, client_old: Any) -> str:
     """Parse LLM response using GPT-4o-mini"""
     answer_schema = {
@@ -83,10 +148,9 @@ def parse_answer(raw_response: str, options: Dict, client_old: Any) -> str:
         "schema": {
             "type": "object",
             "properties": {
-                "thinking": {"type": "string"},
                 "answer_idx": {"type": "string", "enum": list(options.keys())}
             },
-            "required": ["thinking", "answer_idx"],
+            "required": ["answer_idx"],
             "additionalProperties": False
         },
         "strict": True
@@ -94,8 +158,8 @@ def parse_answer(raw_response: str, options: Dict, client_old: Any) -> str:
 
     extraction_prompt = (
         "You are an answer extractor. Extract the answer option from the text below. "
-        "Only return the answer as a JSON object following this format: {\"thinking\": \"<thinking>\", \"answer_idx\": \"<option>\"}, "
-        "where <thinking> is the thinking process and <option> is one of the following: " + ", ".join(options.keys()) + "."
+        "Only return the answer as a JSON object following this format: {\"answer_idx\": \"<option>\"}, "
+        "where <option> is one of the following: " + ", ".join(options.keys()) + "."
         "\nText:\n" + raw_response
     )
     extraction_messages = [{"role": "user", "content": extraction_prompt}]
@@ -105,32 +169,44 @@ def parse_answer(raw_response: str, options: Dict, client_old: Any) -> str:
         response_format={"type": "json_schema", "json_schema": answer_schema}
     )
     extraction_raw_response = extraction_completion.choices[0].message.content.strip()
-    result = AnswerResponse.parse_raw(extraction_raw_response)
-    return result.thinking, result.answer_idx
+    return AnswerResponse.parse_raw(extraction_raw_response).answer_idx.strip()
 
-def run(problem: Dict, client: Any, model: str = "o3-mini", retries: int = 3) -> Dict:
+def run(problem: Dict, client: Any, model: str = "o3-mini", retries: int = 3, num_solutions: int = 5) -> Dict:
     question_text = problem.get('question', '')
     options = problem.get('options', {})
     options_text = ' '.join([f"({key}) {value}" for key, value in options.items()])
+    completion_tokens, prompt_tokens = 0, 0
 
     for attempt in range(retries):
         try:
             start_time = time.time()
             
-            # First call: get direct answer from LLM
-            completion, raw_response = run_cot(question_text, options_text, client, model)
+            solutions = []
+            for i in range(num_solutions):
+                # First call: get direct answer from LLM
+                completion, raw_response = run_cot(question_text, options_text, client, model)
+                
+                # Second call: parse answer using GPT-4o-mini
+                predicted_answer = parse_answer(raw_response, options, client_old)
+                solutions.append(predicted_answer)
             
-            # Second call: parse answer using GPT-4o-mini
-            thinking, predicted_answer = parse_answer(raw_response, options, client_old)
+                # Calculate token usage
+                usage_first = completion.usage
+                if model in ["claude-3-5-sonnet", "claude-3-5-haiku"]:
+                    prompt_tokens += usage_first.input_tokens
+                    completion_tokens += usage_first.output_tokens
+                else:
+                    prompt_tokens += usage_first.prompt_tokens
+                    completion_tokens += usage_first.completion_tokens
 
-            # Calculate token usage
-            usage_first = completion.usage
+            completion, raw_response = ensemble_solutions(problem, solutions, client, model)
             if model in ["claude-3-5-sonnet", "claude-3-5-haiku"]:
-                prompt_tokens = usage_first.input_tokens
-                completion_tokens = usage_first.output_tokens
+                prompt_tokens += completion.usage.input_tokens
+                completion_tokens += completion.usage.output_tokens
             else:
-                prompt_tokens = usage_first.prompt_tokens
-                completion_tokens = usage_first.completion_tokens
+                prompt_tokens += completion.usage.prompt_tokens
+                completion_tokens += completion.usage.completion_tokens
+            predicted_answer = parse_answer(raw_response, options, client_old)
 
             end_time = time.time()
             time_elapsed = end_time - start_time
@@ -168,10 +244,12 @@ if __name__ == "__main__":
     parser.add_argument('--dataset_name', default='medqa')
     parser.add_argument('--dataset_dir', default='../../data/medqa/')
     parser.add_argument('--split', default='test_hard')
+    parser.add_argument('--num_solutions', type=int, default=5)
     parser.add_argument('--start_pos', type=int, default=0)
     parser.add_argument('--end_pos', type=int, default=-1)
     parser.add_argument('--output_files_folder', default='./output/')
     parser.add_argument('--num_processes', type=int, default=4)
+    parser.add_argument('--retries', type=int, default=3)
 
     args = parser.parse_args()
     
@@ -204,7 +282,7 @@ if __name__ == "__main__":
     os.makedirs(args.output_files_folder, exist_ok=True)
     subfolder = os.path.join(args.output_files_folder, args.dataset_name)
     os.makedirs(subfolder, exist_ok=True)
-    existing_output_file = os.path.join(args.output_files_folder, args.dataset_name, f"{args.model_name.split('/')[-1]}-{args.dataset_name}-{args.split}-cot.json")
+    existing_output_file = os.path.join(args.output_files_folder, args.dataset_name, f"{args.model_name.split('/')[-1]}-{args.dataset_name}-{args.split}-cot_sc-{args.num_solutions}.json")
     
     if os.path.exists(existing_output_file):
         print(f"Existing output file found: {existing_output_file}")
@@ -225,7 +303,7 @@ if __name__ == "__main__":
     print(f"Processing {len(problems_to_process)} problems out of {len(problems)} total problems.")
 
     with ThreadPoolExecutor(max_workers=args.num_processes) as executor:
-        futures = {executor.submit(run, problem, client, args.model_name): problem for problem in problems_to_process}
+        futures = {executor.submit(run, problem, client, args.model_name, args.retries, args.num_solutions): problem for problem in problems_to_process}
         for future in tqdm(as_completed(futures), total=len(futures), desc="Processing problems", unit="problem"):
             try:
                 result = future.result()
