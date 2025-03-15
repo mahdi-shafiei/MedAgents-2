@@ -76,7 +76,7 @@ class LLMAgent:
         )
 
         messages = self.history + [{'role': 'user', 'content': full_input}]
-        response = self._generate_response(messages, return_dict, tools)
+        response = self._generate_response(messages, return_dict, tools) if tools else self._generate_response(messages)
 
         if save:
             self.history.extend([
@@ -455,8 +455,6 @@ class ModerationUnit(BaseUnit):
         """
         expert_analysis = {}
         for domain, (agent, weight) in agents.items():
-            print("chat\n"*100)
-            print(chat_history)
             expert_input = chat_history.get(domain, {})
             if not expert_input:
                 continue
@@ -598,9 +596,66 @@ class ModerationUnit(BaseUnit):
             "   - Strengths and limitations\n"
             "   - Contradicting viewpoints\n"
             "4. Key Insights and Follow-up Questions\n\n"
-            "Respond using the structured format in JSON mode."
+#            "Respond using the structured format in JSON mode."
         )
-        return self.agents['Moderator'].chat(summarize_prompt, save=False)
+        
+        summary_schema = {
+            "name": "discussion_summary",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "Expert_Analysis": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                                "Answer": {"type": "string"},
+                                "Justification": {"type": "string"}
+                            },
+                            "required": ["Answer", "Justification"]
+                        }
+                    },
+                    "Decision_Process": {
+                        "type": "object",
+                        "properties": {
+                            "Final_Answer": {"type": "string"},
+                            "Justification": {"type": "string"},
+                            "Limitations": {"type": "string"}
+                        },
+                        "required": ["Final_Answer", "Justification", "Limitations"]
+                    },
+                    "Detailed_Analysis": {
+                        "type": "object",
+                        "properties": {
+                            "Experts_Key_Arguments": {"type": "array", "items": {"type": "string"}},
+                            "Strengths_and_Limitations": {
+                                "type": "object",
+                                "properties": {
+                                    "Strengths": {"type": "array", "items": {"type": "string"}},
+                                    "Limitations": {"type": "array", "items": {"type": "string"}}
+                                }
+                            },
+                            "Contradicting_Viewpoints": {"type": "string"}
+                        }
+                    },
+                    "Key_Insights_and_Follow_up_Questions": {
+                        "type": "object",
+                        "properties": {
+                            "Key_Insights": {"type": "array", "items": {"type": "string"}},
+                            "Follow_up_Questions": {"type": "array", "items": {"type": "string"}}
+                        }
+                    }
+                },
+                "required": ["Expert_Analysis", "Decision_Process", "Detailed_Analysis", "Key_Insights_and_Follow_up_Questions"]
+            },
+            "strict": True
+        }
+        
+        return self.agents['Moderator'].chat(
+            summarize_prompt,
+#            return_dict=summary_schema,
+            save=True
+        )
 
 # TODO(dainiu): We need better design for the discussion unit.
 class DiscussionUnit(BaseUnit):
@@ -741,7 +796,7 @@ class DiscussionUnit(BaseUnit):
                 user_prompt += "Decomposed Q&A pairs:\n"
                 for pair in self.q_a_pairs:
                     user_prompt += f"- Domain: {pair['domain']}\n  - Question: {pair['question']}\n  - Answer: {pair['answer']}\n\n"
-
+            
             response = agent.chat(user_prompt, return_dict=expert_response_schema, save=True)
             return response
         else:
@@ -752,8 +807,8 @@ class DiscussionUnit(BaseUnit):
                 adaptive_user_prompt += f"Debate Summaries:\n{summary}\n"
                 retrieval_response = agent.chat(
                     adaptive_user_prompt,
-                    tools=tools,
-                    save=False
+                    save=False,
+                    tools=tools
                 )
                 if hasattr(retrieval_response, 'tool_calls') and retrieval_response.tool_calls:
                     tool_call = retrieval_response.tool_calls[0]
@@ -798,6 +853,8 @@ class DiscussionUnit(BaseUnit):
                 chat_history[r][domain] = response
 
             summary, answer = self.moderation_unit.run(question, choices, chat_history[r], self.agents, final=r == max_round - 1)
+            # Convert the entire summary JSON to a string format
+#            summary = json.dumps(summary, indent=2)
             chat_history_summary.append(summary)
             answer_by_turns.append(answer)
             if answer['isFinal'] == 'true':
