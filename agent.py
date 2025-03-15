@@ -696,19 +696,55 @@ class DiscussionUnit(BaseUnit):
             },
             "strict": True
         }
+        # Define a tool for the retriever to search for relevant medical information
+        tools = [{
+            "type": "function",
+            "function": {
+                "name": "search_medical_knowledge",
+                "description": "Search for relevant medical information to help perform the task",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The medical question or search query"
+                        },
+                        "options": {
+                            "type": "object",
+                            "properties": {
+                                "rewrite": {
+                                    "type": "boolean",
+                                    "description": "Whether to rewrite the query for better search results"
+                                },
+                            },
+                            "required": ["rewrite"],
+                            "additionalProperties": False
+                        }
+                    },
+                    "required": ["query"],
+                    "additionalProperties": False
+                },
+                "strict": True
+            }
+        }]
+
+        
         if round_num == 0:
             user_prompt = f"The following is a multiple-choice medical question. Solve it step-by-step and choose one option from the given choices.\n\n"
             user_prompt += f"Relevant Document: {og_documents}\n\n"
             user_prompt += f"Question: {_format_question(question, choices)}\n\n"
-            user_prompt += "Decomposed Q&A pairs:\n"
-            for pair in self.q_a_pairs:
-                user_prompt += f"- Domain: {pair['domain']}\n  - Question: {pair['question']}\n  - Answer: {pair['answer']}\n\n"
+            if self.q_a_pairs:
+                user_prompt += "Decomposed Q&A pairs:\n"
+                for pair in self.q_a_pairs:
+                    user_prompt += f"- Domain: {pair['domain']}\n  - Question: {pair['question']}\n  - Answer: {pair['answer']}\n\n"
+            
             response = agent.chat(user_prompt, return_dict=expert_response_schema, save=True)
             return response
         else:
             user_prompt = f"Considering summaries from other experts and previous decomposed Q&A pairs, update your answer.\n"
             user_prompt += f"Debate Summaries:\n{summary}\n"
             user_prompt += f"Question: {_format_question(question, choices)}\n"
+            if self.q_a_pairs:
             user_prompt += "Decomposed Q&A pairs:\n"
             for pair in self.q_a_pairs:
                 user_prompt += f"- Domain: {pair['domain']}\n  - Question: {pair['question']}\n  - Answer: {pair['answer']}\n\n"
@@ -717,7 +753,8 @@ class DiscussionUnit(BaseUnit):
             return response
 
     def run(self, question: str, choices: Dict[str, str], max_round: int = 5) -> List[Any]:
-        self.decomposed_rag(question, choices, rewrite=True, review=False)
+        if self.args.decomposed_rag:
+            self.decomposed_rag(question, choices, rewrite=True, review=False)
 
         answer_by_turns = []
         chat_history = [{agent: "" for agent in self.agents.keys()} for _ in range(max_round)]

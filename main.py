@@ -87,6 +87,16 @@ def parse_args():
                         help='Frequency penalty for LLM generation')
     parser.add_argument('--max_retries', type=int, default=5,
                         help='Maximum retries for LLM generation')
+    parser.add_argument('--retrieval_strategy', type=str, default='adaptive', choices=['adaptive', 'exhaustive', 'disabled'],
+                        help='Retrieval strategy to employ: adaptive (context-dependent retrieval), exhaustive (retrieve for all queries), or disabled (no retrieval)')
+    parser.add_argument('--decomposed_rag', action='store_true', default=False,
+                        help='Whether to use decomposed RAG at the beginning of the process')
+
+
+
+
+
+
     return parser.parse_args()
 
 
