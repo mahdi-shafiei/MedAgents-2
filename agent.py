@@ -57,14 +57,15 @@ class LLMAgent:
 
     def __repr__(self):
         return f"LLMAgent(\n\tdomain={self.domain},\n\tsystem_prompt={self.system_prompt}\n)"
-
-    def chat(self, input_text: str, return_dict: Dict[str, any] = None, save: bool = True) -> str:
+        
+    def chat(self, input_text: str, return_dict: Dict[str, any] = None, save: bool = True, tools: List[Dict] = None) -> str:
         """Generates a response to the input text using the LLM in JSON mode if schema is provided.
 
         Args:
             input_text (str): The input prompt/question.
             return_dict (Dict[str, any], optional): A JSON schema dict specifying the expected response.
             save (bool): Whether to save the interaction in conversation history.
+            tools (List[Dict], optional): A list of tool definitions that the model can use.
 
         Returns:
             str: The generated response text or parsed JSON output if a schema is provided.
@@ -75,7 +76,7 @@ class LLMAgent:
         )
 
         messages = self.history + [{'role': 'user', 'content': full_input}]
-        response = self._generate_response(messages, return_dict)
+        response = self._generate_response(messages, return_dict, tools)
 
         if save:
             self.history.extend([
@@ -90,15 +91,16 @@ class LLMAgent:
 
         return response
 
-    def _generate_response(self, messages: List[Dict[str, str]], return_dict: Dict[str, any] = None) -> str:
+    def _generate_response(self, messages: List[Dict[str, str]], return_dict: Dict[str, any] = None, tools: List[Dict] = None) -> str:
         """Makes API calls to generate responses, handling retries and errors.
 
         Args:
             messages (List[Dict[str, str]]): The conversation messages.
             return_dict (Dict[str, any], optional): JSON schema for the expected response.
+            tools (List[Dict], optional): A list of tool definitions that the model can use.
 
         Returns:
-            str: The generated response text or error message.
+            str: The generated response text or error message, or a tool response object.
         """
         for attempt in range(self.max_retries):
             try:
@@ -114,7 +116,8 @@ class LLMAgent:
                 }
                 if return_dict:
                     request_params["response_format"] = {"type": "json_schema", "json_schema": return_dict}
-
+                if tools:
+                    request_params["tools"] = tools
                 response = llm_client.chat.completions.create(**request_params)
                 self.token_usage['prompt_tokens'] += response.usage.prompt_tokens
                 self.token_usage['completion_tokens'] += response.usage.completion_tokens
@@ -727,39 +730,59 @@ class DiscussionUnit(BaseUnit):
                 "strict": True
             }
         }]
-
         
         if round_num == 0:
             user_prompt = f"The following is a multiple-choice medical question. Solve it step-by-step and choose one option from the given choices.\n\n"
-            user_prompt += f"Relevant Document: {og_documents}\n\n"
             user_prompt += f"Question: {_format_question(question, choices)}\n\n"
-            if self.q_a_pairs:
+            # Naive RAG
+            if self.args.naive_rag:
+                user_prompt += f"Relevant Document: {og_documents}\n\n"
+            # Decomposed RAG
+            if self.args.decomposed_rag:
                 user_prompt += "Decomposed Q&A pairs:\n"
                 for pair in self.q_a_pairs:
                     user_prompt += f"- Domain: {pair['domain']}\n  - Question: {pair['question']}\n  - Answer: {pair['answer']}\n\n"
-            
+
             response = agent.chat(user_prompt, return_dict=expert_response_schema, save=True)
             return response
         else:
-            user_prompt = f"Considering summaries from other experts and previous decomposed Q&A pairs, update your answer.\n"
-            user_prompt += f"Debate Summaries:\n{summary}\n"
-            user_prompt += f"Question: {_format_question(question, choices)}\n"
-            if self.q_a_pairs:
-            user_prompt += "Decomposed Q&A pairs:\n"
-            for pair in self.q_a_pairs:
-                user_prompt += f"- Domain: {pair['domain']}\n  - Question: {pair['question']}\n  - Answer: {pair['answer']}\n\n"
-            user_prompt += "Please think step-by-step and provide your output."
+            # Adaptive RAG
+            if self.args.adaptive_rag:
+                adaptive_user_prompt = f"Based on the question and previous discussions, determine if you need to search for additional medical information.\n"
+                adaptive_user_prompt += f"Question: {_format_question(question, choices)}\n"
+                adaptive_user_prompt += f"Debate Summaries:\n{summary}\n"
+                retrieval_response = agent.chat(
+                    user_prompt,
+                    tools=tools,
+                    save=False
+                )
+                if hasattr(retrieval_response, 'tool_calls') and retrieval_response.tool_calls:
+                    tool_call = retrieval_response.tool_calls[0]
+                    if tool_call.function.name == "search_medical_knowledge":
+                        tool_args = json.loads(tool_call.function.arguments)
+                        query = tool_args.get("query", question)
+                        rewrite = tool_args.get("options", {}).get("rewrite", True)
+                        retrieved_docs = self.search_unit.run(query, choices, rewrite=rewrite, review=self.args.review)
+                response_user_prompt = f"Considering summaries of previous discussions from other experts and the retrieved information, update your answer.\n"
+                response_user_prompt += f"Question: {_format_question(question, choices)}\n"
+                response_user_prompt += f"Debate Summaries:\n{summary}\n"
+                response_user_prompt += f"Retrieved Information:\n{retrieved_docs}\n"
+            else:
+                response_user_prompt = f"Considering summaries of previous discussions from other experts, update your answer.\n"
+                response_user_prompt += f"Debate Summaries:\n{summary}\n"
+                response_user_prompt += f"Question: {_format_question(question, choices)}\n"
+            response_user_prompt += "Please think step-by-step and provide your output."
             response = agent.chat(user_prompt, return_dict=expert_response_schema, save=True)
             return response
 
     def run(self, question: str, choices: Dict[str, str], max_round: int = 5) -> List[Any]:
         if self.args.decomposed_rag:
-            self.decomposed_rag(question, choices, rewrite=True, review=False)
+            self.decomposed_rag(question, choices, rewrite=self.args.rewrite, review=self.args.review)
 
         answer_by_turns = []
         chat_history = [{agent: "" for agent in self.agents.keys()} for _ in range(max_round)]
         chat_history_summary = []
-        og_documents = "\n".join(self.search_unit.run(question, choices, rewrite=True, review=False))
+        og_documents = "\n".join(self.search_unit.run(question, choices, rewrite=True, review=self.args.review))
         for r in range(max_round):
             print("-"*50)
             print(f"{r}th round debate start")

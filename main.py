@@ -67,8 +67,8 @@ def parse_args():
                         help='Top k documents to retrieve')
     parser.add_argument('--rerank_topk', type=int, default=25,
                         help='Top k documents to rerank')
-    parser.add_argument('--rewrite', action='store_true', default=False,
-                        help='Whether to rewrite')
+    parser.add_argument('--rewrite', type=str, choices=['True', 'False', 'Both',], default='False',
+                        help='Whether to use rewritten query, original query, or both')
     parser.add_argument('--review', action='store_true', default=False,
                         help='Whether to review')
     parser.add_argument('--gpu_ids', nargs='+', type=int, default=[0, 1, 2, 3],
@@ -87,8 +87,10 @@ def parse_args():
                         help='Frequency penalty for LLM generation')
     parser.add_argument('--max_retries', type=int, default=5,
                         help='Maximum retries for LLM generation')
-    parser.add_argument('--retrieval_strategy', type=str, default='adaptive', choices=['adaptive', 'exhaustive', 'disabled'],
-                        help='Retrieval strategy to employ: adaptive (context-dependent retrieval), exhaustive (retrieve for all queries), or disabled (no retrieval)')
+    parser.add_argument('--adaptive_rag', action='store_true', default=False,
+                        help='Whether to use adaptive rag during the debate')
+    parser.add_argument('--naive_rag', action='store_true', default=False,
+                        help='Whether to use naive RAG at the beginning of the process')
     parser.add_argument('--decomposed_rag', action='store_true', default=False,
                         help='Whether to use decomposed RAG at the beginning of the process')
 
