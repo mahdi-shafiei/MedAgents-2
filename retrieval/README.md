@@ -1,15 +1,16 @@
 ## 🛠️ Setup the retriever
 1. 🐳 Install Docker if you haven't already.
-2. ⬇️ Download and run the Milvus standalone installation script:
+   - For installation instructions, visit: [Get Docker](https://docs.docker.com/get-started/get-docker/)
+2. 📦 Install the pymilvus package:
+```bash
+pip install -U pymilvus
+```
+3. ⬇️ Download and run the Milvus standalone installation script:
 ```bash
 # Download the installation script
 $ curl -sfL https://raw.githubusercontent.com/milvus-io/milvus/master/scripts/standalone_embed.sh -o standalone_embed.sh
 # Start the Docker container
 $ bash standalone_embed.sh start
-```
-3. 📦 Install the pymilvus package:
-```bash
-pip install pymilvus
 ```
 ## 📤 Upload the corpus
 This section describes how to upload your document corpus to Milvus. The corpus should be organized in the following structure under `medagents/retrieval/corpus/{corpus_name}/`:

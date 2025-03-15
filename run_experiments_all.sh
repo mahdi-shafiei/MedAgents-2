@@ -8,17 +8,32 @@
 #SBATCH --partition=scavenge
 
 LOGS_DIR=logs
-DATA_DIR=../../data
+DATA_DIR=data
 
-for dataset in medqa medmcqa pubmedqa medbullets mmlu-pro mmlu; do
+#for dataset in medqa medmcqa pubmedqa medbullets mmlu-pro mmlu; do
+for dataset in medqa; do
     mkdir -p $LOGS_DIR/$dataset
     for model in gpt-4o-mini; do
-        for split in test_hard; do
+        for split in sample_1_hard; do
             for difficulty in adaptive; do
                 log_file=$LOGS_DIR/$dataset/${model}_${dataset}_${split}_${difficulty}.log
                 error_file=$LOGS_DIR/$dataset/${model}_${dataset}_${split}_${difficulty}.err
                 echo "Running $model on $split with difficulty $difficulty"
-                python main.py --dataset_name $dataset --dataset_dir $DATA_DIR/$dataset/ --split $split --model $model --method syn_verif --output_files_folder ./output/ --num_processes 4 > $log_file 2> $error_file
+                python main.py \
+                --model_name $model \
+                --dataset_name $dataset \
+                --dataset_dir $DATA_DIR \
+                --split $split \
+                --output_files_folder ./output/ \
+                --num_processes 1 \
+                --llm_debate_max_round 2 \
+                --retrieve_topk 100 \
+                --rerank_topk 25 \
+                --rewrite False \
+                --review False \
+                --adaptive_rag False \
+                --naive_rag False \
+                --decomposed_rag False > $log_file 2> $error_file
             done
         done
     done

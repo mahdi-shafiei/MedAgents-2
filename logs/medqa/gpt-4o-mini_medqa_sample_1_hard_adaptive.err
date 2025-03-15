@@ -1,0 +1,26 @@
+Processing queries:   0%|          | 0/1 [00:00<?, ?problem/s]Processing queries:   0%|          | 0/1 [00:31<?, ?problem/s]
+Traceback (most recent call last):
+  File "/home/ubuntu/MedAgents-2/main.py", line 135, in <module>
+    result = future.result()
+             ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/usr/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/MedAgents-2/main.py", line 40, in process_query
+    results = discussion_unit.run(problem['question'], problem['options'], args.llm_debate_max_round)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/MedAgents-2/agent.py", line 800, in run
+    summary, answer = self.moderation_unit.run(question, choices, chat_history[r], self.agents, final=r == max_round - 1)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/MedAgents-2/agent.py", line 565, in run
+    response = self.make_decision(question, choices, chat_history, agents, final)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/MedAgents-2/agent.py", line 464, in make_decision
+    answer = expert_input.get('answer', '')
+             ^^^^^^^^^^^^^^^^
+AttributeError: 'str' object has no attribute 'get'

@@ -84,10 +84,10 @@ class LLMAgent:
                 {'role': 'assistant', 'content': response}
             ])
 
-        # print("\n--------------FULL_INPUT--------------")
-        # print(full_input)
-        # print("\n--------------RESPONSE--------------")
-        # print(response)
+        print("\n--------------FULL_INPUT--------------")
+        print(full_input)
+        print("\n--------------RESPONSE--------------")
+        print(response)
 
         return response
 
@@ -256,9 +256,6 @@ class TriageUnit(BaseUnit):
             )
             for i, specialty in enumerate(specialty_list)
         }
-        for value in expert_list.values():
-            print(value[0])
-            print(value[1])
         return expert_list
     
     def run(self, question: str, choices: Dict[str, str], medical_fields: List[str], num_fields: int = 5, options: str = None) -> Dict[str, Tuple[LLMAgent, float]]:
@@ -420,10 +417,10 @@ class SearchUnit(BaseUnit):
             List[str]: List of relevant documents.
         """
         og_question = question
-        if rewrite:
+        if rewrite == "True":
             question = self.rewrite_query_pseudodoc(question, choices)
         documents = self.retrieve_query(question, choices)
-        if review:
+        if review == "True":
             documents = self.review_documents(og_question, choices, documents)
         return documents
 
@@ -458,6 +455,8 @@ class ModerationUnit(BaseUnit):
         """
         expert_analysis = {}
         for domain, (agent, weight) in agents.items():
+            print("chat\n"*100)
+            print(chat_history)
             expert_input = chat_history.get(domain, {})
             if not expert_input:
                 continue
@@ -533,12 +532,12 @@ class ModerationUnit(BaseUnit):
             "schema": {
                 "type": "object",
                 "properties": {
-                    "Answer": {"type": "string", "enum": list(choices.keys())},
-                    "Justification": {"type": "string"},
-                    "Limitations": {"type": "string"},
-                    "IsFinal": {"type": "string", "enum": ["true", "false"]}
+                    "answer": {"type": "string", "enum": list(choices.keys())},
+                    "justification": {"type": "string"},
+                    "limitations": {"type": "string"},
+                    "isFinal": {"type": "string", "enum": ["true", "false"]}
                 },
-                "required": ["Answer", "Justification", "Limitations", "IsFinal"],
+                "required": ["answer", "justification", "limitations", "isFinal"],
                 "additionalProperties": False
             },
             "strict": True
@@ -564,10 +563,10 @@ class ModerationUnit(BaseUnit):
             Tuple[str, Dict[str, str]]: A summary of the discussion and the final decision.
         """
         response = self.make_decision(question, choices, chat_history, agents, final)
-        answer_final = response['Answer'].strip().upper()
+        answer_final = response['answer'].strip().upper()
         if answer_final not in choices.keys():
             answer_final = list(choices.keys())[0]
-        response['Answer'] = answer_final
+        response['answer'] = answer_final
         summary = self.summarize_discussion(chat_history, response)
         return summary, response
 
@@ -591,9 +590,9 @@ class ModerationUnit(BaseUnit):
             summarize_prompt += f"Justification: {solution.get('justification', '')}\n"
         summarize_prompt += (
             "\n2. Decision Process:\n"
-            f"Final Answer: {decision.get('Answer', '')}\n"
-            f"Justification: {decision.get('Justification', '')}\n"
-            f"Limitations: {decision.get('Limitations', '')}\n"
+            f"Final Answer: {decision.get('answer', '')}\n"
+            f"Justification: {decision.get('justification', '')}\n"
+            f"Limitations: {decision.get('limitations', '')}\n"
             "3. Detailed Analysis:\n"
             "   - Experts' key arguments\n"
             "   - Strengths and limitations\n"
@@ -689,12 +688,12 @@ class DiscussionUnit(BaseUnit):
             "schema": {
                 "type": "object",
                 "properties": {
-                    "Thought": {"type": "string"},
-                    "Answer": {"type": "string", "enum": list(choices.keys())},
-                    "Confidence": {"type": "string", "enum": ["low", "medium", "high"]},
-                    "Justification": {"type": "string"}
+                    "thought": {"type": "string"},
+                    "answer": {"type": "string", "enum": list(choices.keys())},
+                    "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+                    "justification": {"type": "string"}
                 },
-                "required": ["Thought", "Answer", "Confidence", "Justification"],
+                "required": ["thought", "answer", "confidence", "justification"],
                 "additionalProperties": False
             },
             "strict": True
@@ -735,10 +734,10 @@ class DiscussionUnit(BaseUnit):
             user_prompt = f"The following is a multiple-choice medical question. Solve it step-by-step and choose one option from the given choices.\n\n"
             user_prompt += f"Question: {_format_question(question, choices)}\n\n"
             # Naive RAG
-            if self.args.naive_rag:
+            if self.args.naive_rag == "True":
                 user_prompt += f"Relevant Document: {og_documents}\n\n"
             # Decomposed RAG
-            if self.args.decomposed_rag:
+            if self.args.decomposed_rag == "True":
                 user_prompt += "Decomposed Q&A pairs:\n"
                 for pair in self.q_a_pairs:
                     user_prompt += f"- Domain: {pair['domain']}\n  - Question: {pair['question']}\n  - Answer: {pair['answer']}\n\n"
@@ -747,12 +746,12 @@ class DiscussionUnit(BaseUnit):
             return response
         else:
             # Adaptive RAG
-            if self.args.adaptive_rag:
+            if self.args.adaptive_rag == "True":
                 adaptive_user_prompt = f"Based on the question and previous discussions, determine if you need to search for additional medical information.\n"
                 adaptive_user_prompt += f"Question: {_format_question(question, choices)}\n"
                 adaptive_user_prompt += f"Debate Summaries:\n{summary}\n"
                 retrieval_response = agent.chat(
-                    user_prompt,
+                    adaptive_user_prompt,
                     tools=tools,
                     save=False
                 )
@@ -772,17 +771,17 @@ class DiscussionUnit(BaseUnit):
                 response_user_prompt += f"Debate Summaries:\n{summary}\n"
                 response_user_prompt += f"Question: {_format_question(question, choices)}\n"
             response_user_prompt += "Please think step-by-step and provide your output."
-            response = agent.chat(user_prompt, return_dict=expert_response_schema, save=True)
+            response = agent.chat(response_user_prompt, return_dict=expert_response_schema, save=True)
             return response
 
     def run(self, question: str, choices: Dict[str, str], max_round: int = 5) -> List[Any]:
-        if self.args.decomposed_rag:
+        if self.args.decomposed_rag == "True":
             self.decomposed_rag(question, choices, rewrite=self.args.rewrite, review=self.args.review)
 
         answer_by_turns = []
         chat_history = [{agent: "" for agent in self.agents.keys()} for _ in range(max_round)]
         chat_history_summary = []
-        og_documents = "\n".join(self.search_unit.run(question, choices, rewrite=True, review=self.args.review))
+        og_documents = "\n".join(self.search_unit.run(question, choices, rewrite=self.args.rewrite, review=self.args.review))
         for r in range(max_round):
             print("-"*50)
             print(f"{r}th round debate start")
@@ -796,12 +795,11 @@ class DiscussionUnit(BaseUnit):
                     r,
                     "\n".join([f"{i+1}{'st' if i == 0 else 'nd' if i == 1 else 'rd' if i == 2 else 'th'} debate summary: {chat}" for i, chat in enumerate(chat_history_summary)])
                 )
-                print(response)
                 chat_history[r][domain] = response
 
             summary, answer = self.moderation_unit.run(question, choices, chat_history[r], self.agents, final=r == max_round - 1)
             chat_history_summary.append(summary)
             answer_by_turns.append(answer)
-            if answer['IsFinal'] == 'true':
+            if answer['isFinal'] == 'true':
                 break
         return answer_by_turns

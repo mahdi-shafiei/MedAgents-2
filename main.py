@@ -51,13 +51,9 @@ def parse_args():
                         help='Dataset directory')
     parser.add_argument('--split', type=str, default='test_hard',
                         help='Split name')
-    parser.add_argument('--start_pos', type=int, default=0,
-                        help='Start position')
-    parser.add_argument('--end_pos', type=int, default=-1,
-                        help='End position')
     parser.add_argument('--output_files_folder', default='./output/',
                         help='Output files folder')
-    parser.add_argument('--num_processes', type=int, default=2,
+    parser.add_argument('--num_processes', type=int, default=1,
                         help='Number of processes')
     parser.add_argument('--allowed_sources', nargs='+', default=['cpg_2', 'statpearls_2', 'recop_2', 'textbook_2'],
                         help='List of allowed source types')
@@ -67,10 +63,6 @@ def parse_args():
                         help='Top k documents to retrieve')
     parser.add_argument('--rerank_topk', type=int, default=25,
                         help='Top k documents to rerank')
-    parser.add_argument('--rewrite', type=str, choices=['True', 'False', 'Both',], default='False',
-                        help='Whether to use rewritten query, original query, or both')
-    parser.add_argument('--review', action='store_true', default=False,
-                        help='Whether to review')
     parser.add_argument('--gpu_ids', nargs='+', type=int, default=[0, 1, 2, 3],
                         help='GPU IDs to use')
     parser.add_argument('--seed', type=int, default=42,
@@ -87,16 +79,16 @@ def parse_args():
                         help='Frequency penalty for LLM generation')
     parser.add_argument('--max_retries', type=int, default=5,
                         help='Maximum retries for LLM generation')
-    parser.add_argument('--adaptive_rag', action='store_true', default=False,
+    parser.add_argument('--rewrite', type=str, choices=['True', 'False', 'Both',], default='False',
+                        help='Whether to use rewritten query, original query, or both')
+    parser.add_argument('--review', type=str, choices=['True', 'False'], default='False',
+                        help='Whether to review')
+    parser.add_argument('--adaptive_rag', type=str, choices=['True', 'False'], default='False',
                         help='Whether to use adaptive rag during the debate')
-    parser.add_argument('--naive_rag', action='store_true', default=False,
+    parser.add_argument('--naive_rag', type=str, choices=['True', 'False'], default='False',
                         help='Whether to use naive RAG at the beginning of the process')
-    parser.add_argument('--decomposed_rag', action='store_true', default=False,
+    parser.add_argument('--decomposed_rag', type=str, choices=['True', 'False'], default='False',
                         help='Whether to use decomposed RAG at the beginning of the process')
-
-
-
-
 
 
     return parser.parse_args()
@@ -110,7 +102,7 @@ if __name__ == "__main__":
     os.makedirs(args.output_files_folder, exist_ok=True)
     subfolder = os.path.join(args.output_files_folder, args.dataset_name)
     os.makedirs(subfolder, exist_ok=True)
-    existing_output_file = os.path.join(args.output_files_folder, args.dataset_name, f"{args.model_name}-{args.dataset_name}-{args.split}-rounds-{args.llm_debate_max_round}-retrieve-{args.retrieve_topk}-rerank-{args.rerank_topk}-rewrite-{args.rewrite}-review-{args.review}.json")
+    existing_output_file = os.path.join(args.output_files_folder, args.dataset_name, f"{args.model_name}-{args.dataset_name}-{args.split}-rounds-{args.llm_debate_max_round}-retrieve-{args.retrieve_topk}-rerank-{args.rerank_topk}-rewrite-{args.rewrite}-review-{args.review}-adaptive-{args.adaptive_rag}-naive-{args.naive_rag}-decomposed-{args.decomposed_rag}.json")
     
     if os.path.exists(existing_output_file):
         print(f"Existing output file found: {existing_output_file}")
