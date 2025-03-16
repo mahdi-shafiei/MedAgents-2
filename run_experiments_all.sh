@@ -25,15 +25,15 @@ for dataset in medqa; do
                 --dataset_dir $DATA_DIR \
                 --split $split \
                 --output_files_folder ./output/ \
-                --num_processes 10 \
-                --llm_debate_max_round 2 \
+                --num_processes 8 \
+                --llm_debate_max_round 5 \
                 --retrieve_topk 100 \
                 --rerank_topk 25 \
                 --rewrite Both \
                 --review False \
                 --adaptive_rag False \
                 --naive_rag True \
-                --decomposed_rag True \
+                --decomposed_rag False \
                 --agent_memory False > $log_file 2> $error_file
             done
         done

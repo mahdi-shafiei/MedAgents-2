@@ -14,7 +14,6 @@ from agent import TriageUnit, SearchUnit, ModerationUnit, DiscussionUnit
 load_dotenv()
 
 FORMAT_INST = "Reply EXACTLY with the following JSON format.\n{format}\nDO NOT MISS ANY REQUEST FIELDS and ensure that your response is a well-formed JSON object!\n"
-device = "cuda" if torch.cuda.is_available() else "cpu"
 
 def save_results(results, existing_output_file):
     results = sorted(results, key=lambda x: x['realidx'])
@@ -30,7 +29,10 @@ def load_jsonl(file_path: str) -> List[Dict]:
                 data.append(json.loads(line))
     return data
 
-def process_query(problem, args):
+def process_query(problem, args, process_idx):
+    # Set device for this process based on its index
+    device = f"cuda:{process_idx % len(args.gpu_ids)}" if torch.cuda.is_available() and args.gpu_ids else args.device
+    
     retriever = MedCPTRetriever(device)
     triage_unit = TriageUnit(args)
     expert_list = triage_unit.run(problem['question'], problem['options'], MEDICAL_SPECIALTIES_GPT_SELECTED, 5)
@@ -63,7 +65,7 @@ def parse_args():
                         help='Top k documents to retrieve')
     parser.add_argument('--rerank_topk', type=int, default=25,
                         help='Top k documents to rerank')
-    parser.add_argument('--gpu_ids', nargs='+', type=int, default=[0, 1, 2, 3],
+    parser.add_argument('--gpu_ids', nargs='+', type=int, default=[0, 1, 2, 3, 4, 5, 6, 7],
                         help='GPU IDs to use')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed')
@@ -91,6 +93,8 @@ def parse_args():
                         help='Whether to use decomposed RAG at the beginning of the process')
     parser.add_argument('--agent_memory', type=str, choices=['True', 'False'], default='False',
                         help='Whether each agent maintains conversation memory')
+    parser.add_argument('--device', type=str, default="cuda" if torch.cuda.is_available() else "cpu",
+                        help='Default device to use (cuda or cpu) when not using per-process GPU allocation')
 
 
     return parser.parse_args()
@@ -123,11 +127,12 @@ if __name__ == "__main__":
     problems_to_process = [problem for problem in problems if problem['realidx'] not in processed_realidx]
 
     print(f"Processing {len(problems_to_process)} problems out of {len(problems)} total problems.")
+    print(f"Using GPUs: {args.gpu_ids}")
 
     
     with ThreadPoolExecutor(max_workers=args.num_processes) as executor:
         future_to_index = {
-            executor.submit(process_query, problem, args): idx
+            executor.submit(process_query, problem, args, idx): idx
             for idx, problem in enumerate(problems_to_process)
         }
         for future in tqdm(as_completed(future_to_index),
