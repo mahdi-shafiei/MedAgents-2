@@ -343,7 +343,7 @@ class SearchUnit(BaseUnit):
             return []
 
         return list(dict.fromkeys(docs))
-
+    
     def review_documents(self, question, choices: Dict[str, str], documents) -> List[str]:
         """Reviews retrieved documents for relevance.
 
@@ -368,15 +368,27 @@ class SearchUnit(BaseUnit):
             "Document: {}"
         )
         
-        reviewed_docs = []
         formatted_query = _format_question(question, choices)
         
-        for doc in documents:
+        # Process documents in parallel
+        from concurrent.futures import ThreadPoolExecutor
+        
+        def evaluate_document(doc, idx):
             response = self.agents['DocumentEvaluator'].chat(
                 review_prompt.format(formatted_query, doc), save=False
             )
-            if any(label in response.lower() for label in ["ully", "artially"]):
-                reviewed_docs.append(doc)
+            is_helpful = any(label in response.lower() for label in ["ully", "artially"])
+            return (doc, is_helpful, idx)
+        
+        with ThreadPoolExecutor() as executor:
+            futures = [executor.submit(evaluate_document, doc, i) for i, doc in enumerate(documents)]
+            results = [future.result() for future in futures]
+        
+        # Sort results by original index to maintain input order
+        results.sort(key=lambda x: x[2])
+        
+        # Filter only helpful documents
+        reviewed_docs = [doc for doc, is_helpful, _ in results if is_helpful]
 
         return reviewed_docs
 
@@ -678,12 +690,12 @@ class DiscussionUnit(BaseUnit):
             qa_context = ""
             for pair in qa_pairs:
                 qa_context += f"{pair['domain']} Expert's Question: {pair['question']}, Answer: {pair['answer']}\n\n"
-            decompose_prompt += f"Context from previous Q&A pairs:\n\n{qa_context}\n\n"
+            decompose_prompt += f"Context from previous questions and answers::\n\n{qa_context}\n\n"
         decompose_prompt += (
-            "Generate a new, specific question focusing on key terms and gaps in the current answers. "
-            "Each expert should propose a distinct follow-up question to uncover additional relevant information."
+            "To help answer the main question, generate a new, specific question that focuses on key terms and gaps in the current answers. "
+            "This question should explore a unique aspect or a specific detail needed to solve the main question more effectively. "
+            "Each expert should generate a distinct question aimed at uncovering more relevant information for the main question."
         )
-    
         decomposed_query_schema = {
             "name": "decomposed_query_response",
             "schema": {
@@ -703,7 +715,6 @@ class DiscussionUnit(BaseUnit):
         )
         return response['Query']
 
-    # TODO(dainiu): Do we need to run this for each round of debate?
     def decomposed_rag(self, question, choices, rewrite=False, review=False):
         for agent, weight in self.agents.values():
             decomposed_query = self.decompose_query(question, choices, agent, self.q_a_pairs)
@@ -712,6 +723,7 @@ class DiscussionUnit(BaseUnit):
                     self.search_unit.run(decomposed_query, choices, rewrite=False, review=review) +
                     self.search_unit.run(decomposed_query, choices, rewrite=True, review=review)
                 )
+            
             else:
                 decomposed_documents = self.search_unit.run(decomposed_query, choices, rewrite=rewrite, review=review)
             joined_documents = "\n".join(decomposed_documents)

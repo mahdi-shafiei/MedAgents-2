@@ -26,14 +26,14 @@ for dataset in medqa; do
                 --split $split \
                 --output_files_folder ./output/ \
                 --num_processes 8 \
-                --llm_debate_max_round 5 \
+                --llm_debate_max_round 2 \
                 --retrieve_topk 100 \
                 --rerank_topk 25 \
                 --rewrite Both \
                 --review False \
                 --adaptive_rag False \
                 --naive_rag True \
-                --decomposed_rag False \
+                --decomposed_rag True \
                 --agent_memory False > $log_file 2> $error_file
             done
         done

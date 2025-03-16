@@ -49,6 +49,8 @@ class MedCPTRetriever:
 #                filter=source
             )
             evidence_list.extend([result["entity"]["text"] for result in search_res[0][:topk]])
+        # Deduplicate evidence_list while preserving order
+        evidence_list = list(dict.fromkeys(evidence_list))
         return evidence_list
 
     def _medcpt_query_embedding_function(self, docs):
