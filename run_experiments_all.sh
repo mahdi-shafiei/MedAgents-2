@@ -14,7 +14,7 @@ DATA_DIR=data
 for dataset in medqa; do
     mkdir -p $LOGS_DIR/$dataset
     for model in gpt-4o-mini; do
-        for split in sample_1_hard; do
+        for split in test_hard; do
             for difficulty in adaptive; do
                 log_file=$LOGS_DIR/$dataset/${model}_${dataset}_${split}_${difficulty}.log
                 error_file=$LOGS_DIR/$dataset/${model}_${dataset}_${split}_${difficulty}.err
@@ -25,15 +25,16 @@ for dataset in medqa; do
                 --dataset_dir $DATA_DIR \
                 --split $split \
                 --output_files_folder ./output/ \
-                --num_processes 1 \
+                --num_processes 10 \
                 --llm_debate_max_round 2 \
                 --retrieve_topk 100 \
                 --rerank_topk 25 \
                 --rewrite Both \
                 --review False \
-                --adaptive_rag True \
+                --adaptive_rag False \
                 --naive_rag True \
-                --decomposed_rag True > $log_file 2> $error_file
+                --decomposed_rag True \
+                --agent_memory False > $log_file 2> $error_file
             done
         done
     done

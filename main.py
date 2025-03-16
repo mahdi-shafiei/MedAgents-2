@@ -89,6 +89,8 @@ def parse_args():
                         help='Whether to use naive RAG at the beginning of the process')
     parser.add_argument('--decomposed_rag', type=str, choices=['True', 'False'], default='False',
                         help='Whether to use decomposed RAG at the beginning of the process')
+    parser.add_argument('--agent_memory', type=str, choices=['True', 'False'], default='False',
+                        help='Whether each agent maintains conversation memory')
 
 
     return parser.parse_args()
@@ -102,7 +104,7 @@ if __name__ == "__main__":
     os.makedirs(args.output_files_folder, exist_ok=True)
     subfolder = os.path.join(args.output_files_folder, args.dataset_name)
     os.makedirs(subfolder, exist_ok=True)
-    existing_output_file = os.path.join(args.output_files_folder, args.dataset_name, f"{args.model_name}-{args.dataset_name}-{args.split}-rounds-{args.llm_debate_max_round}-retrieve-{args.retrieve_topk}-rerank-{args.rerank_topk}-rewrite-{args.rewrite}-review-{args.review}-adaptive-{args.adaptive_rag}-naive-{args.naive_rag}-decomposed-{args.decomposed_rag}.json")
+    existing_output_file = os.path.join(args.output_files_folder, args.dataset_name, f"{args.model_name}-{args.dataset_name}-{args.split}-rounds-{args.llm_debate_max_round}-retrieve-{args.retrieve_topk}-rerank-{args.rerank_topk}-rewrite-{args.rewrite}-review-{args.review}-adaptive-{args.adaptive_rag}-naive-{args.naive_rag}-decomposed-{args.decomposed_rag}-agent-memory-{args.agent_memory}.json")
     
     if os.path.exists(existing_output_file):
         print(f"Existing output file found: {existing_output_file}")

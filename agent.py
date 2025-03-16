@@ -116,15 +116,21 @@ class LLMAgent:
                     "presence_penalty": self.args.presence_penalty,
                     "frequency_penalty": self.args.frequency_penalty,
                 }
-                if return_dict:
-                    request_params["response_format"] = {"type": "json_schema", "json_schema": return_dict}
                 if tools:
                     request_params["tools"] = tools
+                if return_dict:
+                    request_params["response_format"] = {"type": "json_schema", "json_schema": return_dict}
+
                 response = llm_client.chat.completions.create(**request_params)
                 self.token_usage['prompt_tokens'] += response.usage.prompt_tokens
                 self.token_usage['completion_tokens'] += response.usage.completion_tokens
 
-                return response.choices[0].message.content if not return_dict else json.loads(response.choices[0].message.content)
+                if tools:
+                    return response.choices[0].message
+                elif return_dict:
+                    return json.loads(response.choices[0].message.content)
+                else:
+                    return response.choices[0].message.content
 
             except Exception as e:
                 if "rate" in str(e).lower() or "exceeded" in str(e).lower():
@@ -764,21 +770,21 @@ class DiscussionUnit(BaseUnit):
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "The medical question or search query"
+                            "description": "The medical question or search query made by the agent"
                         },
                         "options": {
                             "type": "object",
                             "properties": {
                                 "rewrite": {
                                     "type": "boolean",
-                                    "description": "Whether to rewrite the query for better search results"
+                                    "description": "Whether to rewrite the query for better search results. The query should be rewritten to be more specific and to include more details, or to be more general and to include less details."
                                 },
                             },
                             "required": ["rewrite"],
                             "additionalProperties": False
                         }
                     },
-                    "required": ["query"],
+                    "required": ["query", "options"],
                     "additionalProperties": False
                 },
                 "strict": True
@@ -842,7 +848,7 @@ class DiscussionUnit(BaseUnit):
 
         for r in range(max_round):
             print("-"*50)
-            print(f"{r}th round debate start")
+            print(f"{r+1}{'st' if r == 0 else 'nd' if r == 1 else 'rd' if r == 2 else 'th'} round debate start")
             print("-"*50)
             for domain, (agent, weight) in self.agents.items():
                 response = self.get_expert_response(

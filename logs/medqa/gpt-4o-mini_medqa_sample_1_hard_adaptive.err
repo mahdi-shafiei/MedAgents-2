@@ -1,23 +1,1 @@
-Processing queries:   0%|          | 0/1 [00:00<?, ?problem/s]Processing queries:   0%|          | 0/1 [07:12<?, ?problem/s]
-Traceback (most recent call last):
-  File "/home/ubuntu/MedAgents-2/main.py", line 135, in <module>
-    result = future.result()
-             ^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.12/concurrent/futures/_base.py", line 449, in result
-    return self.__get_result()
-           ^^^^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
-    raise self._exception
-  File "/usr/lib/python3.12/concurrent/futures/thread.py", line 58, in run
-    result = self.fn(*self.args, **self.kwargs)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/ubuntu/MedAgents-2/main.py", line 40, in process_query
-    results = discussion_unit.run(problem['question'], problem['options'], args.llm_debate_max_round)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/ubuntu/MedAgents-2/agent.py", line 848, in run
-    response = self.get_expert_response(
-               ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/ubuntu/MedAgents-2/agent.py", line 823, in get_expert_response
-    response_user_prompt += f"Retrieved Information:\n{retrieved_docs}\n"
-                                                       ^^^^^^^^^^^^^^
-UnboundLocalError: cannot access local variable 'retrieved_docs' where it is not associated with a value
+Processing queries:   0%|          | 0/1 [00:00<?, ?problem/s]Processing queries: 100%|██████████| 1/1 [06:25<00:00, 385.75s/problem]Processing queries: 100%|██████████| 1/1 [06:25<00:00, 385.75s/problem]
