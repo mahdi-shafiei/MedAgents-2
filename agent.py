@@ -71,12 +71,12 @@ class LLMAgent:
             str: The generated response text or parsed JSON output if a schema is provided.
         """
         full_input = (
-            f"{input_text}\n\n{FORMAT_INST.format(json.dumps(return_dict, indent=4))}"
-            if return_dict else input_text
+#            f"{input_text}\n\n{FORMAT_INST.format(json.dumps(return_dict, indent=4))}"
+            input_text
         )
 
         messages = self.history + [{'role': 'user', 'content': full_input}]
-        response = self._generate_response(messages, return_dict, tools) if tools else self._generate_response(messages)
+        response = self._generate_response(messages, return_dict, tools)
 
         if save:
             self.history.extend([
@@ -815,17 +815,18 @@ class DiscussionUnit(BaseUnit):
                     if tool_call.function.name == "search_medical_knowledge":
                         tool_args = json.loads(tool_call.function.arguments)
                         query = tool_args.get("query", question)
-                        rewrite = tool_args.get("options", {}).get("rewrite", True)
-                        retrieved_docs = self.search_unit.run(query, choices, rewrite=rewrite, review=self.args.review)
+                        rewrite = tool_args.get("options", {}).get("rewrite", self.args.rewrite)
+                        retrieved_docs = "\n".join(self.search_unit.run(query, choices, rewrite=rewrite, review=self.args.review))
                 response_user_prompt = f"Considering summaries of previous discussions from other experts and the retrieved information, update your answer.\n"
                 response_user_prompt += f"Question: {_format_question(question, choices)}\n"
                 response_user_prompt += f"Debate Summaries:\n{summary}\n"
                 response_user_prompt += f"Retrieved Information:\n{retrieved_docs}\n"
             else:
                 response_user_prompt = f"Considering summaries of previous discussions from other experts, update your answer.\n"
-                response_user_prompt += f"Debate Summaries:\n{summary}\n"
                 response_user_prompt += f"Question: {_format_question(question, choices)}\n"
+                response_user_prompt += f"Debate Summaries:\n{summary}\n"
             response_user_prompt += "Please think step-by-step and provide your output."
+            print(agent.chat(response_user_prompt, return_dict=expert_response_schema, save=True))
             response = agent.chat(response_user_prompt, return_dict=expert_response_schema, save=True)
             return response
 
