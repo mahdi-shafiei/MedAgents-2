@@ -29,11 +29,11 @@ for dataset in medqa; do
                 --llm_debate_max_round 2 \
                 --retrieve_topk 100 \
                 --rerank_topk 25 \
-                --rewrite False \
+                --rewrite Both \
                 --review False \
-                --adaptive_rag False \
-                --naive_rag False \
-                --decomposed_rag False > $log_file 2> $error_file
+                --adaptive_rag True \
+                --naive_rag True \
+                --decomposed_rag True > $log_file 2> $error_file
             done
         done
     done

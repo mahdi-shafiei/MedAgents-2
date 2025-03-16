@@ -1,4 +1,4 @@
-Processing queries:   0%|          | 0/1 [00:00<?, ?problem/s]Processing queries:   0%|          | 0/1 [07:12<?, ?problem/s]
+Processing queries:   0%|          | 0/50 [00:00<?, ?problem/s]Processing queries:   0%|          | 0/50 [01:00<?, ?problem/s]
 Traceback (most recent call last):
   File "/home/ubuntu/MedAgents-2/main.py", line 135, in <module>
     result = future.result()
@@ -14,10 +14,26 @@ Traceback (most recent call last):
   File "/home/ubuntu/MedAgents-2/main.py", line 40, in process_query
     results = discussion_unit.run(problem['question'], problem['options'], args.llm_debate_max_round)
               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/ubuntu/MedAgents-2/agent.py", line 848, in run
+  File "/home/ubuntu/MedAgents-2/agent.py", line 847, in run
     response = self.get_expert_response(
                ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/ubuntu/MedAgents-2/agent.py", line 823, in get_expert_response
+  File "/home/ubuntu/MedAgents-2/agent.py", line 825, in get_expert_response
     response_user_prompt += f"Retrieved Information:\n{retrieved_docs}\n"
                                                        ^^^^^^^^^^^^^^
 UnboundLocalError: cannot access local variable 'retrieved_docs' where it is not associated with a value
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/ubuntu/MedAgents-2/main.py", line 126, in <module>
+    with ThreadPoolExecutor(max_workers=args.num_processes) as executor:
+  File "/usr/lib/python3.12/concurrent/futures/_base.py", line 647, in __exit__
+    self.shutdown(wait=True)
+  File "/usr/lib/python3.12/concurrent/futures/thread.py", line 238, in shutdown
+    t.join()
+  File "/usr/lib/python3.12/threading.py", line 1147, in join
+    self._wait_for_tstate_lock()
+  File "/usr/lib/python3.12/threading.py", line 1167, in _wait_for_tstate_lock
+    if lock.acquire(block, timeout):
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt

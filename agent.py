@@ -76,6 +76,8 @@ class LLMAgent:
         )
 
         messages = self.history + [{'role': 'user', 'content': full_input}]
+        print("\n--------------MESSAGES--------------")
+        print(messages)
         response = self._generate_response(messages, return_dict, tools)
 
         if save:
@@ -317,15 +319,13 @@ class SearchUnit(BaseUnit):
             retrieved_docs = self.retriever.retrieve_filtered_sources(
                 formatted_query,
                 retrieval_client,
-                self.allowed_sources,
-                self.device,
-                self.retrieve_topk
+                allowed_sources=self.allowed_sources,
+                topk=self.retrieve_topk
             )
             
             reranked_docs = self.retriever.rerank(
                 formatted_query,
                 retrieved_docs,
-                self.device
             )
             
             docs = reranked_docs[:self.rerank_topk]
@@ -544,7 +544,7 @@ class ModerationUnit(BaseUnit):
         return self.agents['DecisionMaker'].chat(
             decision_prompt,
             return_dict=decision_schema,
-            save=True,
+            save=False,
         )
 
     def run(self, question: str, choices: Dict[str, str], chat_history: Dict[str, Any], agents: Dict[str, Tuple[LLMAgent, float]], final: bool = False) -> Tuple[str, Dict[str, str]]:
@@ -654,7 +654,7 @@ class ModerationUnit(BaseUnit):
         return self.agents['Moderator'].chat(
             summarize_prompt,
 #            return_dict=summary_schema,
-            save=True
+            save=False
         )
 
 # TODO(dainiu): We need better design for the discussion unit.
@@ -797,7 +797,7 @@ class DiscussionUnit(BaseUnit):
                 for pair in self.q_a_pairs:
                     user_prompt += f"- Domain: {pair['domain']}\n  - Question: {pair['question']}\n  - Answer: {pair['answer']}\n\n"
             
-            response = agent.chat(user_prompt, return_dict=expert_response_schema, save=True)
+            response = agent.chat(user_prompt, return_dict=expert_response_schema, save=False)
             return response
         else:
             # Adaptive RAG
@@ -826,8 +826,7 @@ class DiscussionUnit(BaseUnit):
                 response_user_prompt += f"Question: {_format_question(question, choices)}\n"
                 response_user_prompt += f"Debate Summaries:\n{summary}\n"
             response_user_prompt += "Please think step-by-step and provide your output."
-            print(agent.chat(response_user_prompt, return_dict=expert_response_schema, save=True))
-            response = agent.chat(response_user_prompt, return_dict=expert_response_schema, save=True)
+            response = agent.chat(response_user_prompt, return_dict=expert_response_schema, save=False)
             return response
 
     def run(self, question: str, choices: Dict[str, str], max_round: int = 5) -> List[Any]:
@@ -838,6 +837,9 @@ class DiscussionUnit(BaseUnit):
         chat_history = [{agent: "" for agent in self.agents.keys()} for _ in range(max_round)]
         chat_history_summary = []
         og_documents = "\n".join(self.search_unit.run(question, choices, rewrite=self.args.rewrite, review=self.args.review))
+        print("og_documents:")
+        print(og_documents)
+
         for r in range(max_round):
             print("-"*50)
             print(f"{r}th round debate start")
@@ -854,6 +856,7 @@ class DiscussionUnit(BaseUnit):
                 chat_history[r][domain] = response
 
             summary, answer = self.moderation_unit.run(question, choices, chat_history[r], self.agents, final=r == max_round - 1)
+
             # Convert the entire summary JSON to a string format
 #            summary = json.dumps(summary, indent=2)
             chat_history_summary.append(summary)

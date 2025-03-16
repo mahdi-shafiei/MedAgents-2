@@ -28,18 +28,25 @@ class MedCPTRetriever:
         )
         evidence_list = [result["entity"]["text"] for result in search_res[0][:topk]]
         return evidence_list
-
-    def retrieve_filtered_sources(self, query, client, allowed_sources=["source == 'PubMed'", "source == 'PMC'", "source == 'Textbook'", "source == 'CPG'", "source == 'statpearls'", "source == 'recop'", "source == 'textbooks'", "source == 'cpg'"], topk=100):
+    def retrieve_filtered_sources(self, 
+                                 query, 
+                                 client, 
+                                 allowed_sources=['cpg', 'recop', 'textbooks', 'statpearls'],
+#                                                 "source == 'statpearls'", 
+#                                                 "source == 'recop'", 
+#                                                 "source == 'textbooks'", 
+#                                                 "source == 'cpg'"], 
+                                 topk=100):
         evidence_list = []
         query_embedding = self._medcpt_query_embedding_function(query)
         for source in allowed_sources:
             search_res = client.search(
-                collection_name='rag2',
+                collection_name=source,
                 data=[query_embedding],  
                 limit=topk,  
                 search_params={"metric_type": "IP", "params": {}},  
                 output_fields=["text", 'source'], 
-                filter=source
+#                filter=source
             )
             evidence_list.extend([result["entity"]["text"] for result in search_res[0][:topk]])
         return evidence_list

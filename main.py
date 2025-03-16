@@ -55,7 +55,7 @@ def parse_args():
                         help='Output files folder')
     parser.add_argument('--num_processes', type=int, default=1,
                         help='Number of processes')
-    parser.add_argument('--allowed_sources', nargs='+', default=['cpg_2', 'statpearls_2', 'recop_2', 'textbook_2'],
+    parser.add_argument('--allowed_sources', nargs='+', default=['cpg', 'statpearls', 'recop', 'textbooks'],
                         help='List of allowed source types')
     parser.add_argument('--llm_debate_max_round', type=int, default=1,
                         help='Maximum debate rounds')
