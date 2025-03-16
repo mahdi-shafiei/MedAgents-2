@@ -6,6 +6,10 @@
 
 baselines/*/output/
 baselines/*/logs/
+# Ignore logs directory
+logs/
+output/
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/        
