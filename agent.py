@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from pymilvus import MilvusClient
 from retriever import MedCPTRetriever
 from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor
 
 load_dotenv()
 
@@ -370,9 +371,7 @@ class SearchUnit(BaseUnit):
         
         formatted_query = _format_question(question, choices)
         
-        # Process documents in parallel
-        from concurrent.futures import ThreadPoolExecutor
-        
+        # Process documents in parallel        
         def evaluate_document(doc, idx):
             response = self.agents['DocumentEvaluator'].chat(
                 review_prompt.format(formatted_query, doc), save=False
