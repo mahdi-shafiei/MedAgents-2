@@ -26,11 +26,11 @@ for dataset in medqa; do
                 --split $split \
                 --output_files_folder ./output/ \
                 --num_processes 4 \
-                --llm_debate_max_round 2 \
+                --llm_debate_max_round 3 \
                 --retrieve_topk 100 \
-                --rerank_topk 25 \
+                --rerank_topk 100 \
                 --rewrite Both \
-                --review True \
+                --review False \
                 --adaptive_rag False \
                 --naive_rag True \
                 --decomposed_rag True \
