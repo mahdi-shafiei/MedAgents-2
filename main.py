@@ -65,7 +65,7 @@ def parse_args():
                         help='Top k documents to retrieve')
     parser.add_argument('--rerank_topk', type=int, default=25,
                         help='Top k documents to rerank')
-    parser.add_argument('--gpu_ids', nargs='+', type=int, default=[0, 1, 2, 3, 4, 5, 6, 7],
+    parser.add_argument('--gpu_ids', nargs='+', type=int, default=[4, 5, 6, 7],
                         help='GPU IDs to use')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed')

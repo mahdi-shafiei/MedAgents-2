@@ -31,8 +31,7 @@ def _format_question(question: str, options: Dict[str, str]) -> str:
 class LLMAgent:
     """A medical expert agent powered by a large language model.
 
-    This agent represents a medical expert in a specific domain and handles interactions
-    with an LLM API to generate responses to medical queries.
+    This agent represents a medical expert in a specific domain and handles interactions with an LLM API to generate responses to medical queries.
 
     Args:
         domain (str): The medical specialty/domain of the expert.
@@ -42,7 +41,7 @@ class LLMAgent:
     Attributes:
         domain (str): The agent's medical specialty/domain.
         system_prompt (str): The system prompt defining the agent's role.
-        history (list): Conversation history as list of message dicts.
+        memory (list): Conversation memory as list of message dicts.
         token_usage (dict): Tracks prompt and completion token usage.
     """
     def __init__(self, domain: str, system_prompt: str = None, args: argparse.Namespace = None):
@@ -51,11 +50,12 @@ class LLMAgent:
             system_prompt.format(self.domain) if system_prompt 
             else f"You are a medical expert in the domain of {self.domain}."
         )
-        self.history = [{'role': 'system', 'content': self.system_prompt}]
+        self.memory = [{'role': 'system', 'content': self.system_prompt}]
         self.token_usage = {'prompt_tokens': 0, 'completion_tokens': 0}
         self.args = args
         self.max_retries = getattr(args, 'max_retries', 5)
 
+    # COMMENT(jw): Do we need this?
     def __repr__(self):
         return f"LLMAgent(\n\tdomain={self.domain},\n\tsystem_prompt={self.system_prompt}\n)"
         
@@ -65,7 +65,7 @@ class LLMAgent:
         Args:
             input_text (str): The input prompt/question.
             return_dict (Dict[str, any], optional): A JSON schema dict specifying the expected response.
-            save (bool): Whether to save the interaction in conversation history.
+            save (bool): Whether to save the interaction in conversation memory.
             tools (List[Dict], optional): A list of tool definitions that the model can use.
 
         Returns:
@@ -76,13 +76,13 @@ class LLMAgent:
             input_text
         )
 
-        messages = self.history + [{'role': 'user', 'content': full_input}]
+        messages = self.memory + [{'role': 'user', 'content': full_input}]
         print("\n--------------MESSAGES--------------")
         print(messages)
         response = self._generate_response(messages, return_dict, tools)
 
         if save:
-            self.history.extend([
+            self.memory.extend([
                 {'role': 'user', 'content': full_input},
                 {'role': 'assistant', 'content': response}
             ])

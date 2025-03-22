@@ -14,7 +14,7 @@ DATA_DIR=data
 for dataset in medqa; do
     mkdir -p $LOGS_DIR/$dataset
     for model in gpt-4o-mini; do
-        for split in test_hard; do
+        for split in sample_1_hard; do
             for difficulty in adaptive; do
                 log_file=$LOGS_DIR/$dataset/${model}_${dataset}_${split}_${difficulty}.log
                 error_file=$LOGS_DIR/$dataset/${model}_${dataset}_${split}_${difficulty}.err
@@ -25,6 +25,7 @@ for dataset in medqa; do
                 --dataset_dir $DATA_DIR \
                 --split $split \
                 --output_files_folder ./output/ \
+                --gpu_ids 4 5 6 7 \
                 --num_processes 4 \
                 --llm_debate_max_round 3 \
                 --retrieve_topk 100 \
