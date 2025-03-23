@@ -28,6 +28,22 @@ def _format_question(question: str, options: Dict[str, str]) -> str:
         text += f"({choice}) {option}\n"
     return text
 
+def _calculate_query_similarity(current_embedding, previous_embeddings):
+    # Calculate similarities efficiently using batch processing
+    current_tensor = torch.tensor(current_embedding).unsqueeze(0)
+    previous_tensor = torch.tensor(previous_embeddings)
+    
+    # Calculate all similarities at once
+    similarities = torch.nn.functional.cosine_similarity(
+        current_tensor, 
+        previous_tensor,
+        dim=1 
+    )
+    
+    # Check if any similarity is above threshold
+    max_similarity = torch.max(similarities).item()
+    return max_similarity
+
 class LLMAgent:
     """A medical expert agent powered by a large language model.
 
@@ -72,7 +88,6 @@ class LLMAgent:
             str: The generated response text or parsed JSON output if a schema is provided.
         """
         full_input = (
-#            f"{input_text}\n\n{FORMAT_INST.format(json.dumps(return_dict, indent=4))}"
             input_text
         )
 
@@ -82,9 +97,14 @@ class LLMAgent:
         response = self._generate_response(messages, return_dict, tools)
 
         if save:
+            if isinstance(response, dict):
+                response_text = json.dumps(response)
+            else:
+                response_text = response
+            
             self.memory.extend([
                 {'role': 'user', 'content': full_input},
-                {'role': 'assistant', 'content': response}
+                {'role': 'assistant', 'content': response_text}
             ])
 
         print("\n--------------FULL_INPUT--------------")
@@ -673,7 +693,6 @@ class ModerationUnit(BaseUnit):
 #            return_dict=summary_schema,
             save=False
         )
-
 # TODO(dainiu): We need better design for the discussion unit.
 class DiscussionUnit(BaseUnit):
     def __init__(self, args, expert_list, search_unit, moderation_unit):
@@ -691,9 +710,13 @@ class DiscussionUnit(BaseUnit):
                 qa_context += f"{pair['domain']} Expert's Question: {pair['question']}, Answer: {pair['answer']}\n\n"
             decompose_prompt += f"Context from previous questions and answers::\n\n{qa_context}\n\n"
         decompose_prompt += (
-            "To help answer the main question, generate a new, specific question that focuses on key terms and gaps in the current answers. "
-            "This question should explore a unique aspect or a specific detail needed to solve the main question more effectively. "
-            "Each expert should generate a distinct question aimed at uncovering more relevant information for the main question."
+                "To make further progress, generate a new and distinct sub-question that builds upon what has already been explored, "
+                "but targets an uncovered aspect, knowledge gap, or important nuance still relevant to solving the main question.\n\n"
+                "You are contributing to an ongoing investigation—do not repeat previous questions, and aim to add new, useful knowledge to the overall discussion.\n"
+                "Focus on specificity, novelty, and depth. Each expert should aim to advance the conversation from their unique domain perspective."
+#            "To help answer the main question, generate a new, specific question that focuses on key terms and gaps in the current answers. "
+#            "This question should explore a unique aspect or a specific detail needed to solve the main question more effectively. "
+#            "Each expert should generate a distinct question aimed at uncovering more relevant information for the main question."
         )
         decomposed_query_schema = {
             "name": "decomposed_query_response",
@@ -712,12 +735,44 @@ class DiscussionUnit(BaseUnit):
             return_dict=decomposed_query_schema,
             save='decompose_query' in save
         )
+        # Encode the current query
+        current_query = response['Query']
+        current_embedding = self.search_unit.retriever._medcpt_query_encode(current_query)
+        
+        # Check if a similar query has been asked before
+        if self.q_a_pairs:
+            # Extract previous questions and encode them
+            previous_questions = [pair['question'] for pair in self.q_a_pairs]
+            previous_embeddings = [pair['embedding'] for pair in self.q_a_pairs]
             
-        return response['Query']
+            # Calculate similarity between current query and previous queries
+            max_similarity = _calculate_query_similarity(current_embedding, previous_embeddings)
+            
+            if max_similarity > self.args.query_similarity_threshold:
+                # Generate a new query if too similar
+                clarify_prompt = (
+                    f"Your previous question '{current_query}' is too similar to questions already asked.\n"
+                    f"Please generate a completely different question that explores a new aspect of the main problem.\n"
+                    f"Previous questions include: {', '.join(previous_questions)}\n"
+                    f"Ensure your new question addresses a unique angle not covered by these questions."
+                )
+                new_response = agent.chat(
+                    clarify_prompt,
+                    return_dict=decomposed_query_schema,
+                    save='decompose_query' in save
+                )
+                response = new_response
+                # Re-encode the new query
+                current_query = response['Query']
+                current_embedding = self.search_unit.retriever._medcpt_query_encode(current_query)
+
+                if 'decompose_query' in save:
+                    agent.memory[-1]= {'role': 'assistant', 'content': json.dumps(response)}
+        return response['Query'], current_embedding
 
     def decomposed_rag(self, question, choices, rewrite=False, review=False, save=[]):
         for agent, weight in self.agents.values():
-            decomposed_query = self.decompose_query(question, choices, agent, self.q_a_pairs)
+            decomposed_query, query_embedding = self.decompose_query(question, choices, agent, self.q_a_pairs, save)
             if rewrite == "Both":
                 decomposed_documents = (
                     self.search_unit.run(decomposed_query, choices, rewrite=True, review=review) +
@@ -738,7 +793,8 @@ class DiscussionUnit(BaseUnit):
                 'domain': agent.domain,
                 'weight': weight,
                 'question': decomposed_query,
-                'answer': decomposed_answer
+                'embedding': query_embedding,
+                'answer': decomposed_answer,
             })
 
     def get_expert_response(self, domain: str, question: str, choices: Dict[str, str], og_documents: str, round_num: int, summary: str, save: List[str]) -> Dict[str, Any]:
@@ -833,6 +889,33 @@ class DiscussionUnit(BaseUnit):
                     if tool_call.function.name == "search_medical_knowledge":
                         tool_args = json.loads(tool_call.function.arguments)
                         query = tool_args.get("query", question)
+                        query_embedding = self.search_unit.retriever._medcpt_query_encode(query)
+                        # Check if the query is similar to any previously decomposed queries
+                        if hasattr(self, 'q_a_pairs') and self.q_a_pairs:
+                            # Check similarity with previous decomposed queries
+                            for pair in self.q_a_pairs:
+                                prev_query = pair['question']
+                                prev_embedding = pair['embedding']
+                                
+                                # Calculate cosine similarity using the similarity function
+                                similarity = self.search_unit.retriever.similarity(query_embedding, prev_embedding)
+                                
+                                # If similarity exceeds threshold, rewrite the query
+                                if similarity > self.args.query_similarity_threshold:
+                                    print(f"Found similar query: {prev_query} | Similarity score: {similarity}")
+                                    previous_questions = [p['question'] for p in self.q_a_pairs]
+                                    clarify_prompt = (
+                                        f"Your previous question '{query}' is too similar to questions already asked.\n"
+                                        f"Please generate a completely different question that explores a new aspect of the main problem.\n"
+                                        f"Previous questions include: {', '.join(previous_questions[:3])}\n"
+                                        f"Ensure your new question addresses a unique angle not covered by these questions."
+                                    )
+                                    query_refinement_response = agent.chat(
+                                        clarify_prompt,
+                                        save=False
+                                    )
+                                    query = query_refinement_response.content
+                                    break
                         rewrite = tool_args.get("options", {}).get("rewrite", self.args.rewrite)
                         retrieved_docs = "\n".join(self.search_unit.run(query, choices, rewrite=rewrite, review=self.args.review))
                 response_user_prompt = f"Considering summaries of previous discussions from other experts and the retrieved information, update your answer.\n"

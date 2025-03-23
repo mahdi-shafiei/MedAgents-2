@@ -91,6 +91,8 @@ def parse_args():
                         help='Whether to use naive RAG at the beginning of the process')
     parser.add_argument('--decomposed_rag', type=str, choices=['True', 'False'], default='False',
                         help='Whether to use decomposed RAG at the beginning of the process')
+    parser.add_argument('--query_similarity_threshold', type=float, default=0.85,
+                        help='Similarity threshold for detecting similar queries in decomposed RAG')
     parser.add_argument('--agent_memory', type=str, nargs='+', default=['decompose_query', 'decompose_answer', 'debate'],
                         help='List of stages to save (e.g., decompose, triage, debate)')
     parser.add_argument('--device', type=str, default="cuda" if torch.cuda.is_available() else "cpu",

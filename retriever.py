@@ -20,7 +20,7 @@ class MedCPTRetriever:
         search_res = client.search(
             collection_name='rag2',
             data=[
-                self._medcpt_query_embedding_function(query)
+                self._medcpt_query_encode(query)
             ],  
             limit=topk,  
             search_params={"metric_type": "IP", "params": {}},  
@@ -38,7 +38,7 @@ class MedCPTRetriever:
 #                                                 "source == 'cpg'"], 
                                  topk=100):
         evidence_list = []
-        query_embedding = self._medcpt_query_embedding_function(query)
+        query_embedding = self._medcpt_query_encode(query)
         for source in allowed_sources:
             search_res = client.search(
                 collection_name=source,
@@ -53,9 +53,9 @@ class MedCPTRetriever:
         evidence_list = list(dict.fromkeys(evidence_list))
         return evidence_list
 
-    def _medcpt_query_embedding_function(self, docs):
+    def _medcpt_query_encode(self, query):
         encoded = self.tokenizer_q(
-            docs,
+            query,
             truncation=True,
             padding=True,
             return_tensors='pt',
