@@ -91,8 +91,8 @@ def parse_args():
                         help='Whether to use naive RAG at the beginning of the process')
     parser.add_argument('--decomposed_rag', type=str, choices=['True', 'False'], default='False',
                         help='Whether to use decomposed RAG at the beginning of the process')
-    parser.add_argument('--agent_memory', type=str, choices=['True', 'False'], default='False',
-                        help='Whether each agent maintains conversation memory')
+    parser.add_argument('--agent_memory', type=str, nargs='+', default=['decompose_query', 'decompose_answer', 'debate'],
+                        help='List of stages to save (e.g., decompose, triage, debate)')
     parser.add_argument('--device', type=str, default="cuda" if torch.cuda.is_available() else "cpu",
                         help='Default device to use (cuda or cpu) when not using per-process GPU allocation')
 

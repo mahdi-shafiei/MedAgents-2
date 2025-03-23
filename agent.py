@@ -1,16 +1,16 @@
 import os
 import json
 import time
-from typing import List, Dict, Tuple, Optional, Any
-from openai import AzureOpenAI, OpenAI
 import argparse
 import warnings
-from constants import FORMAT_INST
+from typing import List, Dict, Tuple, Optional, Any
+from openai import AzureOpenAI, OpenAI
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
+from dotenv import load_dotenv
 from pymilvus import MilvusClient
 from retriever import MedCPTRetriever
-from dotenv import load_dotenv
-from concurrent.futures import ThreadPoolExecutor
+from constants import FORMAT_INST
 
 load_dotenv()
 
@@ -302,7 +302,7 @@ class SearchUnit(BaseUnit):
                 "Write a medical passage that can help answer the given query. Include key terminology for the answer.", 
                 args),
             'DocumentEvaluator': LLMAgent("Document Evaluator", 
-                "You are an expert in evaluating document relevance to a query.", 
+                "You are an expert at evaluating a document's usefulness in answering a specific query, not just its relevance. Focus on whether the content truly helps solve the problem posed by the query.", 
                 args)
         }
         self.retriever = retriever
@@ -683,7 +683,7 @@ class DiscussionUnit(BaseUnit):
         self.moderation_unit = moderation_unit
         self.q_a_pairs = []
 
-    def decompose_query(self, question, choices: Dict[str, str], agent: LLMAgent, qa_pairs: List[Dict[str, str]]) -> str:
+    def decompose_query(self, question, choices: Dict[str, str], agent: LLMAgent, qa_pairs: List[Dict[str, str]], save: List[str]) -> str:
         decompose_prompt = f"Main question to solve: {_format_question(question, choices)}\n"
         if qa_pairs:
             qa_context = ""
@@ -710,17 +710,18 @@ class DiscussionUnit(BaseUnit):
         response = agent.chat(
             decompose_prompt, 
             return_dict=decomposed_query_schema,
-            save=False  # TODO(dainiu): look into the save flag, does the agent need to look at history when decomposing a question?
+            save='decompose_query' in save
         )
+            
         return response['Query']
 
-    def decomposed_rag(self, question, choices, rewrite=False, review=False):
+    def decomposed_rag(self, question, choices, rewrite=False, review=False, save=[]):
         for agent, weight in self.agents.values():
             decomposed_query = self.decompose_query(question, choices, agent, self.q_a_pairs)
             if rewrite == "Both":
                 decomposed_documents = (
-                    self.search_unit.run(decomposed_query, choices, rewrite=False, review=review) +
-                    self.search_unit.run(decomposed_query, choices, rewrite=True, review=review)
+                    self.search_unit.run(decomposed_query, choices, rewrite=True, review=review) +
+                    self.search_unit.run(decomposed_query, choices, rewrite=False, review=review)
                 )
             
             else:
@@ -732,7 +733,7 @@ class DiscussionUnit(BaseUnit):
                 f"Question:\n{decomposed_query}\n"
                 "Answer:"
             )
-            decomposed_answer = agent.chat(rag_prompt, save=False)  # TODO(dainiu): look into the save flag, does the agent need to look at history when decomposing a question?
+            decomposed_answer = agent.chat(rag_prompt, save='decompose_answer' in save) # each agent save their decomposed question and answer
             self.q_a_pairs.append({
                 'domain': agent.domain,
                 'weight': weight,
@@ -740,7 +741,7 @@ class DiscussionUnit(BaseUnit):
                 'answer': decomposed_answer
             })
 
-    def get_expert_response(self, domain: str, question: str, choices: Dict[str, str], og_documents: str, round_num: int, summary: str) -> Dict[str, Any]:
+    def get_expert_response(self, domain: str, question: str, choices: Dict[str, str], og_documents: str, round_num: int, summary: str, save: List[str]) -> Dict[str, Any]:
         """Gets an expert's response for a debate round using JSON mode.
 
         Args:
@@ -814,7 +815,7 @@ class DiscussionUnit(BaseUnit):
                 for pair in self.q_a_pairs:
                     user_prompt += f"- Domain: {pair['domain']}\n  - Question: {pair['question']}\n  - Answer: {pair['answer']}\n\n"
             
-            response = agent.chat(user_prompt, return_dict=expert_response_schema, save=False)
+            response = agent.chat(user_prompt, return_dict=expert_response_schema, save='debate' in save)
             return response
         else:
             # Adaptive RAG
@@ -843,12 +844,12 @@ class DiscussionUnit(BaseUnit):
                 response_user_prompt += f"Question: {_format_question(question, choices)}\n"
                 response_user_prompt += f"Debate Summaries:\n{summary}\n"
             response_user_prompt += "Please think step-by-step and provide your output."
-            response = agent.chat(response_user_prompt, return_dict=expert_response_schema, save=False)
+            response = agent.chat(response_user_prompt, return_dict=expert_response_schema, save='debate' in save)
             return response
 
     def run(self, question: str, choices: Dict[str, str], max_round: int = 5) -> List[Any]:
         if self.args.decomposed_rag == "True":
-            self.decomposed_rag(question, choices, rewrite=self.args.rewrite, review=self.args.review)
+            self.decomposed_rag(question, choices, rewrite=self.args.rewrite, review=self.args.review, save=self.args.agent_memory)
 
         answer_by_turns = []
         chat_history = [{agent: "" for agent in self.agents.keys()} for _ in range(max_round)]
@@ -869,6 +870,7 @@ class DiscussionUnit(BaseUnit):
                     og_documents,
                     r,
                     "\n".join([f"{i+1}{'st' if i == 0 else 'nd' if i == 1 else 'rd' if i == 2 else 'th'} debate summary: {chat}" for i, chat in enumerate(chat_history_summary)])
+                    save=self.args.agent_memory
                 )
                 chat_history[r][domain] = response
 
