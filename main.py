@@ -85,14 +85,18 @@ def parse_args():
                         help='Whether to use rewritten query, original query, or both')
     parser.add_argument('--review', type=str, choices=['True', 'False'], default='False',
                         help='Whether to review')
-    parser.add_argument('--adaptive_rag', type=str, choices=['True', 'False'], default='False',
-                        help='Whether to use adaptive rag during the debate')
     parser.add_argument('--naive_rag', type=str, choices=['True', 'False'], default='False',
                         help='Whether to use naive RAG at the beginning of the process')
     parser.add_argument('--decomposed_rag', type=str, choices=['True', 'False'], default='False',
                         help='Whether to use decomposed RAG at the beginning of the process')
+    parser.add_argument('--adaptive_rag', type=str, choices=['True', 'False'], default='False',
+                        help='Whether to use adaptive rag during the debate')
     parser.add_argument('--query_similarity_threshold', type=float, default=0.85,
-                        help='Similarity threshold for detecting similar queries in decomposed RAG')
+                        help='Similarity threshold for detecting similar queries in decomposed,adaptive RAG')
+    parser.add_argument('--decomposed_query_strategy', type=str, choices=['reuse', 'generate', 'none'], default='rewrite',
+                        help='Strategy for handling similar queries in decomposed RAG')
+    parser.add_argument('--adaptive_query_strategy', type=str, choices=['reuse', 'generate', 'none'], default='reuse',
+                        help='Strategy for handling similar queries in adaptive RAG')
     parser.add_argument('--agent_memory', type=str, nargs='+', default=['decompose_query', 'decompose_answer', 'debate'],
                         help='List of stages to save (e.g., decompose, triage, debate)')
     parser.add_argument('--device', type=str, default="cuda" if torch.cuda.is_available() else "cpu",

@@ -40,10 +40,10 @@ def _calculate_query_similarity(current_embedding, previous_embeddings):
         previous_tensor,
         dim=1 
     )
-    
     # Check if any similarity is above threshold
     max_similarity = torch.max(similarities).item()
-    return max_similarity
+    max_idx = torch.argmax(similarities).item()
+    return max_similarity, max_idx
 
 class LLMAgent:
     """A medical expert agent powered by a large language model.
@@ -708,12 +708,24 @@ class DiscussionUnit(BaseUnit):
         self.search_unit = search_unit
         self.moderation_unit = moderation_unit
         self.q_a_pairs = []
-
-    def decompose_query(self, question, choices: Dict[str, str], agent: LLMAgent, qa_pairs: List[Dict[str, str]], save: List[str]) -> str:
+        
+    def decompose_query(self, question, choices: Dict[str, str], agent: LLMAgent, q_a_pairs: List[Dict[str, str]], save: List[str]) -> Tuple[str, List[float]]:
+        """Generates a decomposed query from an expert agent to explore a specific aspect of the main question.
+        
+        Args:
+            question (str): The main medical question.
+            choices (Dict[str, str]): Answer choices for the question.
+            agent (LLMAgent): The expert agent generating the query.
+            q_a_pairs (List[Dict[str, str]]): Previous question-answer pairs.
+            save (List[str]): List of stages to save in agent memory.
+            
+        Returns:
+            Tuple[str, List[float]]: The decomposed query and its embedding.
+        """
         decompose_prompt = f"Main question to solve: {_format_question(question, choices)}\n"
-        if qa_pairs:
+        if q_a_pairs:
             qa_context = ""
-            for pair in qa_pairs:
+            for pair in q_a_pairs:
                 qa_context += f"{pair['domain']} Expert's Question: {pair['question']}, Answer: {pair['answer']}\n\n"
             decompose_prompt += f"Context from previous questions and answers::\n\n{qa_context}\n\n"
         decompose_prompt += (
@@ -746,48 +758,124 @@ class DiscussionUnit(BaseUnit):
         current_query = response['Query']
         current_embedding = self.search_unit.retriever._medcpt_query_encode(current_query)
         
-        # Check if a similar query has been asked before
-        if self.q_a_pairs:
-            # Extract previous questions and encode them
-            previous_questions = [pair['question'] for pair in self.q_a_pairs]
-            previous_embeddings = [pair['embedding'] for pair in self.q_a_pairs]
+        return current_query, current_embedding
+    
+    def generate_new_query(self, agent: LLMAgent, current_query: str, previous_questions: List[str], save: List[str]) -> Tuple[str, List[float]]:
+        """Generates a new query when the current one is too similar to previous queries.
+        
+        Args:
+            agent (LLMAgent): The expert agent generating the query.
+            current_query (str): The currently generated query.
+            previous_questions (List[str]): List of previously asked questions.
+            save (List[str]): List of stages to save in agent memory.
             
-            # Calculate similarity between current query and previous queries
-            max_similarity = _calculate_query_similarity(current_embedding, previous_embeddings)
-            
-            if max_similarity > self.args.query_similarity_threshold:
-                # Generate a new query if too similar
-                clarify_prompt = (
-                    f"Your previous question '{current_query}' is too similar to questions already asked.\n"
-                    f"Please generate a completely different question that explores a new aspect of the main problem.\n"
-                    f"Previous questions include: {', '.join(previous_questions)}\n"
-                    f"Ensure your new question addresses a unique angle not covered by these questions."
-                )
-                new_response = agent.chat(
-                    clarify_prompt,
-                    return_dict=decomposed_query_schema,
-                    save='decompose_query' in save
-                )
-                response = new_response
-                # Re-encode the new query
-                current_query = response['Query']
-                current_embedding = self.search_unit.retriever._medcpt_query_encode(current_query)
+        Returns:
+            Tuple[str, List[float]]: The new query and its embedding.
+        """
+        decomposed_query_schema = {
+            "name": "decomposed_query_response",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "Query": {"type": "string"}
+                },
+                "required": ["Query"],
+                "additionalProperties": False
+            },
+            "strict": True
+        }
+        
+        clarify_prompt = (
+            f"Your previous question '{current_query}' is too similar to questions already asked.\n"
+            f"Please generate a completely different question that explores a new aspect of the main problem.\n"
+            f"Previous questions include: {', '.join(previous_questions)}\n"
+            f"Ensure your new question addresses a unique angle not covered by these questions."
+        )
+        new_response = agent.chat(
+            clarify_prompt,
+            return_dict=decomposed_query_schema,
+            save='decompose_query' in save
+        )
+        
+        # Re-encode the new query
+        new_query = new_response['Query']
+        new_embedding = self.search_unit.retriever._medcpt_query_encode(new_query)
 
-                if 'decompose_query' in save:
-                    agent.memory[-1]= {'role': 'assistant', 'content': json.dumps(response)}
-        return response['Query'], current_embedding
+        if 'decompose_query' in save:
+            agent.memory[-1] = {'role': 'assistant', 'content': json.dumps(new_response)}
+            
+        return new_query, new_embedding
+    
+    def reuse_documents(self, similar_idx: int) -> List[str]:
+        """Reuses documents from a similar previous query.
+        
+        Args:
+            similar_idx (int): Index of the similar query in q_a_pairs.
+            
+        Returns:
+            List[str]: The documents from the similar query.
+        """
+        # Extract documents from the similar query
+        similar_documents = self.q_a_pairs[similar_idx]['documents']
+        return similar_documents
+    
+    def handle_similar_query(self, agent: LLMAgent, current_query: str, current_embedding: List[float], save: List[str]) -> Tuple[str, List[float], Optional[List[str]]]:
+        """Handles the case when a generated query is too similar to previous queries.
+        
+        Args:
+            agent (LLMAgent): The expert agent generating the query.
+            current_query (str): The currently generated query.
+            current_embedding (List[float]): The embedding of the current query.
+            save (List[str]): List of stages to save in agent memory.
+            
+        Returns:
+            Tuple[str, List[float], Optional[List[str]]]: The potentially revised query, its embedding, and reused documents if applicable.
+        """
+        # Check if there are previous queries to compare with
+        if not self.q_a_pairs:
+            return current_query, current_embedding, None
+            
+        # Extract previous questions and encode them
+        previous_questions = [pair['question'] for pair in self.q_a_pairs]
+        previous_embeddings = [pair['embedding'] for pair in self.q_a_pairs]
+        
+        # Calculate similarity between current query and previous queries
+        max_similarity, max_idx = _calculate_query_similarity(current_embedding, previous_embeddings)
+        
+        if max_similarity > self.args.query_similarity_threshold:            
+            if self.args.decomposed_query_strategy == 'reuse':
+                # Reuse the documents from the similar query
+                reused_documents = self.reuse_documents(max_idx)
+                return current_query, current_embedding, reused_documents
+            
+            elif self.args.decomposed_query_strategy == 'generate':
+                # Generate a new query if too similar
+                new_query, new_embedding = self.generate_new_query(agent, current_query, previous_questions, save)
+                return new_query, new_embedding, None
+            
+            # If strategy is 'none', we just keep the current query as is
+            
+        return current_query, current_embedding, None
 
     def decomposed_rag(self, question, choices, rewrite=False, review=False, save=[]):
         for agent, weight in self.agents.values():
+            # Step 1: Generate decomposed query
             decomposed_query, query_embedding = self.decompose_query(question, choices, agent, self.q_a_pairs, save)
-            if rewrite == "Both":
-                decomposed_documents = (
-                    self.search_unit.run(decomposed_query, choices, rewrite=True, review=review) +
-                    self.search_unit.run(decomposed_query, choices, rewrite=False, review=review)
-                )
             
+            # Step 2: Handle similar queries
+            final_query, final_embedding, reused_documents = self.handle_similar_query(agent, decomposed_query, query_embedding, save)
+            
+            # Step 3: Retrieve documents if not reusing
+            if reused_documents is None:
+                if rewrite == "Both":
+                    decomposed_documents = (
+                        self.search_unit.run(final_query, choices, rewrite=True, review=review) +
+                        self.search_unit.run(final_query, choices, rewrite=False, review=review)
+                    )
+                else:
+                    decomposed_documents = self.search_unit.run(final_query, choices, rewrite=rewrite, review=review)
             else:
-                decomposed_documents = self.search_unit.run(decomposed_query, choices, rewrite=rewrite, review=review)
+                decomposed_documents = reused_documents
             joined_documents = "\n".join(decomposed_documents)
             rag_prompt = (
                 "The following is a decomposed medical question by an expert. Provide a concise yet informative answer based on the relevant document and original question.\n\n"
@@ -802,6 +890,7 @@ class DiscussionUnit(BaseUnit):
                 'question': decomposed_query,
                 'embedding': query_embedding,
                 'answer': decomposed_answer,
+                'documents': joined_documents
             })
 
     def get_expert_response(self, domain: str, question: str, choices: Dict[str, str], og_documents: str, round_num: int, summary: str, save: List[str]) -> Dict[str, Any]:
