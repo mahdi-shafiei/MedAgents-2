@@ -31,7 +31,7 @@ def load_jsonl(file_path: str) -> List[Dict]:
 
 def process_query(problem, args, process_idx):
     # Set device for this process based on its index
-    device = f"cuda:{process_idx % len(args.gpu_ids)}" if torch.cuda.is_available() and args.gpu_ids else args.device
+    device = f"cuda:{args.gpu_ids[process_idx % len(args.gpu_ids)]}" if torch.cuda.is_available() and args.gpu_ids else args.device
     
     retriever = MedCPTRetriever(device)
     triage_unit = TriageUnit(args)
@@ -97,6 +97,8 @@ def parse_args():
                         help='List of stages to save (e.g., decompose, triage, debate)')
     parser.add_argument('--device', type=str, default="cuda" if torch.cuda.is_available() else "cpu",
                         help='Default device to use (cuda or cpu) when not using per-process GPU allocation')
+    parser.add_argument('--splice_length', type=int, default=500,
+                        help='Length of response to print when splicing is enabled')
 
 
     return parser.parse_args()
@@ -108,9 +110,10 @@ if __name__ == "__main__":
     script_name = os.path.splitext(os.path.basename(__file__))[0]
 
     os.makedirs(args.output_files_folder, exist_ok=True)
-    subfolder = os.path.join(args.output_files_folder, args.dataset_name)
+    date_folder = datetime.now().strftime("%Y%m%d")
+    subfolder = os.path.join(args.output_files_folder, args.dataset_name, date_folder)
     os.makedirs(subfolder, exist_ok=True)
-    existing_output_file = os.path.join(args.output_files_folder, args.dataset_name, f"{args.model_name}-{args.dataset_name}-{args.split}-rounds-{args.llm_debate_max_round}-retrieve-{args.retrieve_topk}-rerank-{args.rerank_topk}-rewrite-{args.rewrite}-review-{args.review}-adaptive-{args.adaptive_rag}-naive-{args.naive_rag}-decomposed-{args.decomposed_rag}-agent-memory-{args.agent_memory}.json")
+    existing_output_file = os.path.join(args.output_files_folder, args.dataset_name, date_folder, f"{args.model_name}-{args.dataset_name}-{args.split}-rounds-{args.llm_debate_max_round}-retrieve-{args.retrieve_topk}-rerank-{args.rerank_topk}-rewrite-{args.rewrite}-review-{args.review}-adaptive-{args.adaptive_rag}-naive-{args.naive_rag}-decomposed-{args.decomposed_rag}-agent-memory-{args.agent_memory}.json")
     
     if os.path.exists(existing_output_file):
         print(f"Existing output file found: {existing_output_file}")

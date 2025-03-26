@@ -14,10 +14,12 @@ DATA_DIR=data
 for dataset in medqa; do
     mkdir -p $LOGS_DIR/$dataset
     for model in gpt-4o-mini; do
-        for split in sample_1_hard; do
+        for split in sample_1_hard; do #sample_1_hard, test_hard
             for difficulty in adaptive; do
-                log_file=$LOGS_DIR/$dataset/${model}_${dataset}_${split}_${difficulty}.log
-                error_file=$LOGS_DIR/$dataset/${model}_${dataset}_${split}_${difficulty}.err
+                date_folder=$(date +"%Y%m%d")
+                mkdir -p $LOGS_DIR/$dataset/$date_folder
+                log_file=$LOGS_DIR/$dataset/$date_folder/${model}_${dataset}_${split}_${difficulty}.log
+                error_file=$LOGS_DIR/$dataset/$date_folder/${model}_${dataset}_${split}_${difficulty}.err
                 echo "Running $model on $split with difficulty $difficulty"
                 python main.py \
                 --model_name $model \
@@ -29,13 +31,14 @@ for dataset in medqa; do
                 --num_processes 4 \
                 --llm_debate_max_round 3 \
                 --retrieve_topk 100 \
-                --rerank_topk 100 \
+                --rerank_topk 32 \
                 --rewrite Both \
                 --review False \
-                --adaptive_rag False \
+                --adaptive_rag True \
                 --naive_rag True \
                 --decomposed_rag True \
-                --agent_memory False > $log_file 2> $error_file
+                --agent_memory False \
+                --splice_length 500  > $log_file 2> $error_file
             done
         done
     done

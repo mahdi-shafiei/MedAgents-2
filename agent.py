@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import torch
 import argparse
 import warnings
 from typing import List, Dict, Tuple, Optional, Any
@@ -92,25 +93,31 @@ class LLMAgent:
         )
 
         messages = self.memory + [{'role': 'user', 'content': full_input}]
-        print("\n--------------MESSAGES--------------")
-        print(messages)
+        print(f"\n--------------MESSAGES (Agent: {self.domain})--------------")
+        for ith, i in enumerate(messages):
+            print(f"{ith}: {str(i)[:self.args.splice_length]}")
         response = self._generate_response(messages, return_dict, tools)
 
+#        print("\n--------------FULL_INPUT--------------")
+#        print(full_input[:self.args.splice_length])    
+
+        
+        if isinstance(response, dict):
+            response_text = json.dumps(response)
+        else:
+            response_text = response
+
+        print(f"\n--------------RESPONSE (Agent: {self.domain})--------------")
+        try:    
+            print(response_text[:self.args.splice_length])
+        except:
+            print(response_text)
+
         if save:
-            if isinstance(response, dict):
-                response_text = json.dumps(response)
-            else:
-                response_text = response
-            
             self.memory.extend([
                 {'role': 'user', 'content': full_input},
                 {'role': 'assistant', 'content': response_text}
             ])
-
-        print("\n--------------FULL_INPUT--------------")
-        print(full_input)
-        print("\n--------------RESPONSE--------------")
-        print(response)
 
         return response
 
@@ -884,40 +891,44 @@ class DiscussionUnit(BaseUnit):
                     save=False,
                     tools=tools
                 )
+                retrieved_docs = ""
                 if hasattr(retrieval_response, 'tool_calls') and retrieval_response.tool_calls:
-                    tool_call = retrieval_response.tool_calls[0]
-                    if tool_call.function.name == "search_medical_knowledge":
-                        tool_args = json.loads(tool_call.function.arguments)
-                        query = tool_args.get("query", question)
-                        query_embedding = self.search_unit.retriever._medcpt_query_encode(query)
-                        # Check if the query is similar to any previously decomposed queries
-                        if hasattr(self, 'q_a_pairs') and self.q_a_pairs:
-                            # Check similarity with previous decomposed queries
-                            for pair in self.q_a_pairs:
-                                prev_query = pair['question']
-                                prev_embedding = pair['embedding']
-                                
-                                # Calculate cosine similarity using the similarity function
-                                similarity = self.search_unit.retriever.similarity(query_embedding, prev_embedding)
-                                
-                                # If similarity exceeds threshold, rewrite the query
-                                if similarity > self.args.query_similarity_threshold:
-                                    print(f"Found similar query: {prev_query} | Similarity score: {similarity}")
-                                    previous_questions = [p['question'] for p in self.q_a_pairs]
-                                    clarify_prompt = (
-                                        f"Your previous question '{query}' is too similar to questions already asked.\n"
-                                        f"Please generate a completely different question that explores a new aspect of the main problem.\n"
-                                        f"Previous questions include: {', '.join(previous_questions[:3])}\n"
-                                        f"Ensure your new question addresses a unique angle not covered by these questions."
-                                    )
-                                    query_refinement_response = agent.chat(
-                                        clarify_prompt,
-                                        save=False
-                                    )
-                                    query = query_refinement_response.content
-                                    break
-                        rewrite = tool_args.get("options", {}).get("rewrite", self.args.rewrite)
-                        retrieved_docs = "\n".join(self.search_unit.run(query, choices, rewrite=rewrite, review=self.args.review))
+                    for tool_call in retrieval_response.tool_calls:
+                        if tool_call.function.name == "search_medical_knowledge":
+                            tool_args = json.loads(tool_call.function.arguments)
+                            query = tool_args.get("query", question)
+                            query_embedding = self.search_unit.retriever._medcpt_query_encode(query)
+                            # Check if the query is similar to any previously decomposed queries
+                            if hasattr(self, 'q_a_pairs') and self.q_a_pairs:
+                                # Check similarity with previous decomposed queries
+                                for pair in self.q_a_pairs:
+                                    prev_query = pair['question']
+                                    prev_embedding = pair['embedding']
+                                    
+                                    # Calculate cosine similarity using the similarity function
+                                    max_similarity = _calculate_query_similarity(query_embedding, prev_embedding)
+                                    
+                                    # If similarity exceeds threshold, rewrite the query
+                                    if max_similarity > self.args.query_similarity_threshold:
+                                        print(f"Found similar query: {prev_query} | Similarity score: {max_similarity}")
+                                        previous_questions = [p['question'] for p in self.q_a_pairs]
+                                        clarify_prompt = (
+                                            f"Your previous question '{query}' is too similar to questions already asked.\n"
+                                            f"Please generate a completely different question that explores a new aspect of the main problem.\n"
+                                            f"Previous questions include: {', '.join(previous_questions[:3])}\n"
+                                            f"Ensure your new question addresses a unique angle not covered by these questions."
+                                        )
+                                        query_refinement_response = agent.chat(
+                                            clarify_prompt,
+                                            save=False
+                                        )
+                                        query = query_refinement_response.content
+                                        break
+                            rewrite = tool_args.get("options", {}).get("rewrite", self.args.rewrite)
+                            new_docs = self.search_unit.run(query, choices, rewrite=rewrite, review=self.args.review)
+                            if retrieved_docs:
+                                retrieved_docs += "\n\n"
+                            retrieved_docs += "\n".join(new_docs)
                 response_user_prompt = f"Considering summaries of previous discussions from other experts and the retrieved information, update your answer.\n"
                 response_user_prompt += f"Question: {_format_question(question, choices)}\n"
                 response_user_prompt += f"Debate Summaries:\n{summary}\n"
@@ -933,13 +944,12 @@ class DiscussionUnit(BaseUnit):
     def run(self, question: str, choices: Dict[str, str], max_round: int = 5) -> List[Any]:
         if self.args.decomposed_rag == "True":
             self.decomposed_rag(question, choices, rewrite=self.args.rewrite, review=self.args.review, save=self.args.agent_memory)
-
+    
         answer_by_turns = []
         chat_history = [{agent: "" for agent in self.agents.keys()} for _ in range(max_round)]
         chat_history_summary = []
         og_documents = "\n".join(self.search_unit.run(question, choices, rewrite=self.args.rewrite, review=self.args.review))
-        print("og_documents:")
-        print(og_documents)
+        print(f"og_documents: {og_documents[:self.args.splice_length]}")
 
         for r in range(max_round):
             print("-"*50)
@@ -952,7 +962,7 @@ class DiscussionUnit(BaseUnit):
                     choices,
                     og_documents,
                     r,
-                    "\n".join([f"{i+1}{'st' if i == 0 else 'nd' if i == 1 else 'rd' if i == 2 else 'th'} debate summary: {chat}" for i, chat in enumerate(chat_history_summary)])
+                    "\n".join([f"{i+1}{'st' if i == 0 else 'nd' if i == 1 else 'rd' if i == 2 else 'th'} debate summary: {chat}" for i, chat in enumerate(chat_history_summary)]),
                     save=self.args.agent_memory
                 )
                 chat_history[r][domain] = response
