@@ -982,50 +982,76 @@ class DiscussionUnit(BaseUnit):
                 )
                 retrieved_docs = ""
                 if hasattr(retrieval_response, 'tool_calls') and retrieval_response.tool_calls:
+                    # Calculate documents per query based on total number of tool calls
+                    num_tool_calls = len([tc for tc in retrieval_response.tool_calls if tc.function.name == "search_medical_knowledge"])
+                    docs_per_query = self.args.rerank_topk // max(1, num_tool_calls)
+                    
                     for tool_call in retrieval_response.tool_calls:
                         if tool_call.function.name == "search_medical_knowledge":
                             tool_args = json.loads(tool_call.function.arguments)
                             query = tool_args.get("query", question)
                             query_embedding = self.search_unit.retriever._medcpt_query_encode(query)
+                            
                             # Check if the query is similar to any previously decomposed queries
-                            if hasattr(self, 'q_a_pairs') and self.q_a_pairs:
-                                # Check similarity with previous decomposed queries
-                                for pair in self.q_a_pairs:
-                                    prev_query = pair['question']
-                                    prev_embedding = pair['embedding']
-                                    
-                                    # Calculate cosine similarity using the similarity function
-                                    max_similarity = _calculate_query_similarity(query_embedding, prev_embedding)
-                                    
-                                    # If similarity exceeds threshold, rewrite the query
-                                    if max_similarity > self.args.query_similarity_threshold:
-                                        print(f"Found similar query: {prev_query} | Similarity score: {max_similarity}")
-                                        previous_questions = [p['question'] for p in self.q_a_pairs]
-                                        clarify_prompt = (
-                                            f"Your previous question '{query}' is too similar to questions already asked.\n"
-                                            f"Please generate a completely different question that explores a new aspect of the main problem.\n"
-                                            f"Previous questions include: {', '.join(previous_questions[:3])}\n"
-                                            f"Ensure your new question addresses a unique angle not covered by these questions."
-                                        )
-                                        query_refinement_response = agent.chat(
-                                            clarify_prompt,
-                                            save=False
-                                        )
-                                        query = query_refinement_response.content
-                                        break
-                            rewrite = tool_args.get("options", {}).get("rewrite", self.args.rewrite)
-                            new_docs = self.search_unit.run(query, choices, rewrite=rewrite, review=self.args.review)
+                            if self.q_a_pairs:
+                                previous_embeddings = [p['embedding'] for p in self.q_a_pairs]
+                                if previous_embeddings:
+                                    max_similarity, max_idx = _calculate_query_similarity(query_embedding, previous_embeddings)
+                            
+                            # If similarity exceeds threshold, apply the appropriate strategy
+                            if max_similarity > self.args.query_similarity_threshold:
+                                similar_query = self.q_a_pairs[max_idx]['question']
+                                print(f"Found similar query: {similar_query} | Similarity score: {max_similarity}")
+                                previous_questions = [p['question'] for p in self.q_a_pairs]
+                                
+                                if self.args.adaptive_query_strategy == "reuse":
+                                    # Reuse the documents from the similar query in q_a_pairs using the max_idx
+                                    reused_docs = self.q_a_pairs[max_idx].get('documents', [])
+                                    query = similar_query
+                                elif self.args.adaptive_query_strategy == "generate":
+                                    # Generate a new query
+                                    clarify_prompt = (
+                                        f"Your previous question '{query}' is too similar to questions already asked.\n"
+                                        f"Please generate a completely different question that explores a new aspect of the main problem.\n"
+                                        f"Previous questions include: {', '.join(previous_questions)}\n"
+                                        f"Ensure your new question addresses a unique angle not covered by these questions."
+                                    )
+                                    new_query_response = agent.chat(
+                                        clarify_prompt,
+                                        save=False
+                                    )
+                                    query = new_query_response.content
+                                    query_embedding = self.search_unit.retriever._medcpt_query_encode(query)
+                            
+                            # If we're reusing documents, use those instead of retrieving new ones
+                            if reused_docs:
+                                new_docs = reused_docs[:docs_per_query]
+                            else:
+                                rewrite = tool_args.get("options", {}).get("rewrite", self.args.rewrite)
+                                new_docs = self.search_unit.run(query, choices, rewrite=rewrite, review=self.args.review)
+                                
+                                # Store the query, embedding, and documents in q_a_pairs if not already similar to existing queries
+                                if max_similarity <= self.args.query_similarity_threshold:
+                                    self.q_a_pairs.append({
+                                        'domain': agent.domain,
+                                        'question': query,
+                                        'embedding': query_embedding,
+                                        'documents': new_docs,
+                                        'answer': ''  # Will be filled later if needed
+                                    })
+                            
                             if retrieved_docs:
                                 retrieved_docs += "\n\n"
-                            retrieved_docs += "\n".join(new_docs)
-                response_user_prompt = f"Considering summaries of previous discussions from other experts and the retrieved information, update your answer.\n"
-                response_user_prompt += f"Question: {_format_question(question, choices)}\n"
-                response_user_prompt += f"Debate Summaries:\n{summary}\n"
-                response_user_prompt += f"Retrieved Information:\n{retrieved_docs}\n"
+                            retrieved_docs += f"Query: {query}\nRetrieved Documents:\n" + "\n".join(new_docs)
+                
+                response_user_prompt = f"Considering summaries of previous discussions from other experts and the retrieved information, update your answer.\n\n"
+                response_user_prompt += f"Question: {_format_question(question, choices)}\n\n"
+                response_user_prompt += f"Debate Summaries:\n{summary}\n\n"
+                response_user_prompt += f"Retrieved Information:\n{retrieved_docs}\n\n"
             else:
-                response_user_prompt = f"Considering summaries of previous discussions from other experts, update your answer.\n"
-                response_user_prompt += f"Question: {_format_question(question, choices)}\n"
-                response_user_prompt += f"Debate Summaries:\n{summary}\n"
+                response_user_prompt = f"Considering summaries of previous discussions from other experts, update your answer.\n\n"
+                response_user_prompt += f"Question: {_format_question(question, choices)}\n\n"
+                response_user_prompt += f"Debate Summaries:\n{summary}\n\n"
             response_user_prompt += "Please think step-by-step and provide your output."
             response = agent.chat(response_user_prompt, return_dict=expert_response_schema, save='debate' in save)
             return response
