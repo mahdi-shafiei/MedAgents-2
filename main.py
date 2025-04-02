@@ -14,7 +14,6 @@ from agent import TriageUnit, SearchUnit, ModerationUnit, DiscussionUnit
 load_dotenv()
 
 FORMAT_INST = "Reply EXACTLY with the following JSON format.\n{format}\nDO NOT MISS ANY REQUEST FIELDS and ensure that your response is a well-formed JSON object!\n"
-device = "cuda" if torch.cuda.is_available() else "cpu"
 
 def save_results(results, existing_output_file):
     results = sorted(results, key=lambda x: x['realidx'])
@@ -30,7 +29,10 @@ def load_jsonl(file_path: str) -> List[Dict]:
                 data.append(json.loads(line))
     return data
 
-def process_query(problem, args):
+def process_query(problem, args, process_idx):
+    # Set device for this process based on its index
+    device = f"cuda:{args.gpu_ids[process_idx % len(args.gpu_ids)]}" if torch.cuda.is_available() and args.gpu_ids else args.device
+    
     retriever = MedCPTRetriever(device)
     triage_unit = TriageUnit(args)
     expert_list = triage_unit.run(problem['question'], problem['options'], MEDICAL_SPECIALTIES_GPT_SELECTED, 5)
@@ -63,7 +65,7 @@ def parse_args():
                         help='Top k documents to retrieve')
     parser.add_argument('--rerank_topk', type=int, default=25,
                         help='Top k documents to rerank')
-    parser.add_argument('--gpu_ids', nargs='+', type=int, default=[0, 1, 2, 3],
+    parser.add_argument('--gpu_ids', nargs='+', type=int, default=[4, 5, 6, 7],
                         help='GPU IDs to use')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed')
@@ -83,14 +85,24 @@ def parse_args():
                         help='Whether to use rewritten query, original query, or both')
     parser.add_argument('--review', type=str, choices=['True', 'False'], default='False',
                         help='Whether to review')
-    parser.add_argument('--adaptive_rag', type=str, choices=['True', 'False'], default='False',
-                        help='Whether to use adaptive rag during the debate')
     parser.add_argument('--naive_rag', type=str, choices=['True', 'False'], default='False',
                         help='Whether to use naive RAG at the beginning of the process')
     parser.add_argument('--decomposed_rag', type=str, choices=['True', 'False'], default='False',
                         help='Whether to use decomposed RAG at the beginning of the process')
-    parser.add_argument('--agent_memory', type=str, choices=['True', 'False'], default='False',
-                        help='Whether each agent maintains conversation memory')
+    parser.add_argument('--adaptive_rag', type=str, choices=['True', 'False'], default='False',
+                        help='Whether to use adaptive rag during the debate')
+    parser.add_argument('--query_similarity_threshold', type=float, default=0.85,
+                        help='Similarity threshold for detecting similar queries in decomposed,adaptive RAG')
+    parser.add_argument('--decomposed_query_strategy', type=str, choices=['reuse', 'generate', 'none'], default='rewrite',
+                        help='Strategy for handling similar queries in decomposed RAG')
+    parser.add_argument('--adaptive_query_strategy', type=str, choices=['reuse', 'generate', 'none'], default='reuse',
+                        help='Strategy for handling similar queries in adaptive RAG')
+    parser.add_argument('--agent_memory', type=str, nargs='+', default=['decompose_query', 'decompose_answer', 'debate'],
+                        help='List of stages to save (e.g., decompose, triage, debate)')
+    parser.add_argument('--device', type=str, default="cuda" if torch.cuda.is_available() else "cpu",
+                        help='Default device to use (cuda or cpu) when not using per-process GPU allocation')
+    parser.add_argument('--splice_length', type=int, default=500,
+                        help='Length of response to print when splicing is enabled')
 
 
     return parser.parse_args()
@@ -102,9 +114,10 @@ if __name__ == "__main__":
     script_name = os.path.splitext(os.path.basename(__file__))[0]
 
     os.makedirs(args.output_files_folder, exist_ok=True)
-    subfolder = os.path.join(args.output_files_folder, args.dataset_name)
+    date_folder = datetime.now().strftime("%Y%m%d")
+    subfolder = os.path.join(args.output_files_folder, args.dataset_name, date_folder)
     os.makedirs(subfolder, exist_ok=True)
-    existing_output_file = os.path.join(args.output_files_folder, args.dataset_name, f"{args.model_name}-{args.dataset_name}-{args.split}-rounds-{args.llm_debate_max_round}-retrieve-{args.retrieve_topk}-rerank-{args.rerank_topk}-rewrite-{args.rewrite}-review-{args.review}-adaptive-{args.adaptive_rag}-naive-{args.naive_rag}-decomposed-{args.decomposed_rag}-agent-memory-{args.agent_memory}.json")
+    existing_output_file = os.path.join(args.output_files_folder, args.dataset_name, date_folder, f"{args.model_name}-{args.dataset_name}-{args.split}-rounds-{args.llm_debate_max_round}-retrieve-{args.retrieve_topk}-rerank-{args.rerank_topk}-rewrite-{args.rewrite}-review-{args.review}-adaptive-{args.adaptive_rag}-naive-{args.naive_rag}-decomposed-{args.decomposed_rag}-agent-memory-{args.agent_memory}.json")
     
     if os.path.exists(existing_output_file):
         print(f"Existing output file found: {existing_output_file}")
@@ -123,11 +136,12 @@ if __name__ == "__main__":
     problems_to_process = [problem for problem in problems if problem['realidx'] not in processed_realidx]
 
     print(f"Processing {len(problems_to_process)} problems out of {len(problems)} total problems.")
+    print(f"Using GPUs: {args.gpu_ids}")
 
     
     with ThreadPoolExecutor(max_workers=args.num_processes) as executor:
         future_to_index = {
-            executor.submit(process_query, problem, args): idx
+            executor.submit(process_query, problem, args, idx): idx
             for idx, problem in enumerate(problems_to_process)
         }
         for future in tqdm(as_completed(future_to_index),

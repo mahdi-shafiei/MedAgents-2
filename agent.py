@@ -1,15 +1,17 @@
 import os
 import json
 import time
-from typing import List, Dict, Tuple, Optional, Any
-from openai import AzureOpenAI, OpenAI
+import torch
 import argparse
 import warnings
-from constants import FORMAT_INST
+from typing import List, Dict, Tuple, Optional, Any
+from openai import AzureOpenAI, OpenAI
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
+from dotenv import load_dotenv
 from pymilvus import MilvusClient
 from retriever import MedCPTRetriever
-from dotenv import load_dotenv
+from constants import FORMAT_INST
 
 load_dotenv()
 
@@ -27,11 +29,26 @@ def _format_question(question: str, options: Dict[str, str]) -> str:
         text += f"({choice}) {option}\n"
     return text
 
+def _calculate_query_similarity(current_embedding, previous_embeddings):
+    # Calculate similarities efficiently using batch processing
+    current_tensor = torch.tensor(current_embedding).unsqueeze(0)
+    previous_tensor = torch.tensor(previous_embeddings)
+    
+    # Calculate all similarities at once
+    similarities = torch.nn.functional.cosine_similarity(
+        current_tensor, 
+        previous_tensor,
+        dim=1 
+    )
+    # Check if any similarity is above threshold
+    max_similarity = torch.max(similarities).item()
+    max_idx = torch.argmax(similarities).item()
+    return max_similarity, max_idx
+
 class LLMAgent:
     """A medical expert agent powered by a large language model.
 
-    This agent represents a medical expert in a specific domain and handles interactions
-    with an LLM API to generate responses to medical queries.
+    This agent represents a medical expert in a specific domain and handles interactions with an LLM API to generate responses to medical queries.
 
     Args:
         domain (str): The medical specialty/domain of the expert.
@@ -41,7 +58,7 @@ class LLMAgent:
     Attributes:
         domain (str): The agent's medical specialty/domain.
         system_prompt (str): The system prompt defining the agent's role.
-        history (list): Conversation history as list of message dicts.
+        memory (list): Conversation memory as list of message dicts.
         token_usage (dict): Tracks prompt and completion token usage.
     """
     def __init__(self, domain: str, system_prompt: str = None, args: argparse.Namespace = None):
@@ -50,11 +67,12 @@ class LLMAgent:
             system_prompt.format(self.domain) if system_prompt 
             else f"You are a medical expert in the domain of {self.domain}."
         )
-        self.history = [{'role': 'system', 'content': self.system_prompt}]
+        self.memory = [{'role': 'system', 'content': self.system_prompt}]
         self.token_usage = {'prompt_tokens': 0, 'completion_tokens': 0}
         self.args = args
         self.max_retries = getattr(args, 'max_retries', 5)
 
+    # COMMENT(jw): Do we need this?
     def __repr__(self):
         return f"LLMAgent(\n\tdomain={self.domain},\n\tsystem_prompt={self.system_prompt}\n)"
         
@@ -64,32 +82,42 @@ class LLMAgent:
         Args:
             input_text (str): The input prompt/question.
             return_dict (Dict[str, any], optional): A JSON schema dict specifying the expected response.
-            save (bool): Whether to save the interaction in conversation history.
+            save (bool): Whether to save the interaction in conversation memory.
             tools (List[Dict], optional): A list of tool definitions that the model can use.
 
         Returns:
             str: The generated response text or parsed JSON output if a schema is provided.
         """
         full_input = (
-#            f"{input_text}\n\n{FORMAT_INST.format(json.dumps(return_dict, indent=4))}"
             input_text
         )
 
-        messages = self.history + [{'role': 'user', 'content': full_input}]
-        print("\n--------------MESSAGES--------------")
-        print(messages)
+        messages = self.memory + [{'role': 'user', 'content': full_input}]
+        print(f"\n--------------MESSAGES (Agent: {self.domain})--------------")
+        for ith, i in enumerate(messages):
+            print(f"{ith}: {str(i)[:self.args.splice_length]}")
         response = self._generate_response(messages, return_dict, tools)
 
-        if save:
-            self.history.extend([
-                {'role': 'user', 'content': full_input},
-                {'role': 'assistant', 'content': response}
-            ])
+#        print("\n--------------FULL_INPUT--------------")
+#        print(full_input[:self.args.splice_length])    
 
-        print("\n--------------FULL_INPUT--------------")
-        print(full_input)
-        print("\n--------------RESPONSE--------------")
-        print(response)
+        
+        if isinstance(response, dict):
+            response_text = json.dumps(response)
+        else:
+            response_text = response
+
+        print(f"\n--------------RESPONSE (Agent: {self.domain})--------------")
+        try:    
+            print(response_text[:self.args.splice_length])
+        except:
+            print(response_text)
+
+        if save:
+            self.memory.extend([
+                {'role': 'user', 'content': full_input},
+                {'role': 'assistant', 'content': response_text}
+            ])
 
         return response
 
@@ -301,7 +329,7 @@ class SearchUnit(BaseUnit):
                 "Write a medical passage that can help answer the given query. Include key terminology for the answer.", 
                 args),
             'DocumentEvaluator': LLMAgent("Document Evaluator", 
-                "You are an expert in evaluating document relevance to a query.", 
+                "You are an expert at evaluating a document's usefulness in answering a specific query, not just its relevance. Focus on whether the content truly helps solve the problem posed by the query.", 
                 args)
         }
         self.retriever = retriever
@@ -343,7 +371,7 @@ class SearchUnit(BaseUnit):
             return []
 
         return list(dict.fromkeys(docs))
-
+    
     def review_documents(self, question, choices: Dict[str, str], documents) -> List[str]:
         """Reviews retrieved documents for relevance.
 
@@ -368,15 +396,25 @@ class SearchUnit(BaseUnit):
             "Document: {}"
         )
         
-        reviewed_docs = []
         formatted_query = _format_question(question, choices)
         
-        for doc in documents:
+        # Process documents in parallel        
+        def evaluate_document(doc, idx):
             response = self.agents['DocumentEvaluator'].chat(
                 review_prompt.format(formatted_query, doc), save=False
             )
-            if any(label in response.lower() for label in ["ully", "artially"]):
-                reviewed_docs.append(doc)
+            is_helpful = any(label in response.lower() for label in ["ully", "artially"])
+            return (doc, is_helpful, idx)
+        
+        with ThreadPoolExecutor() as executor:
+            futures = [executor.submit(evaluate_document, doc, i) for i, doc in enumerate(documents)]
+            results = [future.result() for future in futures]
+        
+        # Sort results by original index to maintain input order
+        results.sort(key=lambda x: x[2])
+        
+        # Filter only helpful documents
+        reviewed_docs = [doc for doc, is_helpful, _ in results if is_helpful]
 
         return reviewed_docs
 
@@ -662,7 +700,6 @@ class ModerationUnit(BaseUnit):
 #            return_dict=summary_schema,
             save=False
         )
-
 # TODO(dainiu): We need better design for the discussion unit.
 class DiscussionUnit(BaseUnit):
     def __init__(self, args, expert_list, search_unit, moderation_unit):
@@ -671,19 +708,35 @@ class DiscussionUnit(BaseUnit):
         self.search_unit = search_unit
         self.moderation_unit = moderation_unit
         self.q_a_pairs = []
-
-    def decompose_query(self, question, choices: Dict[str, str], agent: LLMAgent, qa_pairs: List[Dict[str, str]]) -> str:
+        
+    def decompose_query(self, question, choices: Dict[str, str], agent: LLMAgent, q_a_pairs: List[Dict[str, str]], save: List[str]) -> Tuple[str, List[float]]:
+        """Generates a decomposed query from an expert agent to explore a specific aspect of the main question.
+        
+        Args:
+            question (str): The main medical question.
+            choices (Dict[str, str]): Answer choices for the question.
+            agent (LLMAgent): The expert agent generating the query.
+            q_a_pairs (List[Dict[str, str]]): Previous question-answer pairs.
+            save (List[str]): List of stages to save in agent memory.
+            
+        Returns:
+            Tuple[str, List[float]]: The decomposed query and its embedding.
+        """
         decompose_prompt = f"Main question to solve: {_format_question(question, choices)}\n"
-        if qa_pairs:
+        if q_a_pairs:
             qa_context = ""
-            for pair in qa_pairs:
+            for pair in q_a_pairs:
                 qa_context += f"{pair['domain']} Expert's Question: {pair['question']}, Answer: {pair['answer']}\n\n"
-            decompose_prompt += f"Context from previous Q&A pairs:\n\n{qa_context}\n\n"
+            decompose_prompt += f"Context from previous questions and answers::\n\n{qa_context}\n\n"
         decompose_prompt += (
-            "Generate a new, specific question focusing on key terms and gaps in the current answers. "
-            "Each expert should propose a distinct follow-up question to uncover additional relevant information."
+                "To make further progress, generate a new and distinct sub-question that builds upon what has already been explored, "
+                "but targets an uncovered aspect, knowledge gap, or important nuance still relevant to solving the main question.\n\n"
+                "You are contributing to an ongoing investigation—do not repeat previous questions, and aim to add new, useful knowledge to the overall discussion.\n"
+                "Focus on specificity, novelty, and depth. Each expert should aim to advance the conversation from their unique domain perspective."
+#            "To help answer the main question, generate a new, specific question that focuses on key terms and gaps in the current answers. "
+#            "This question should explore a unique aspect or a specific detail needed to solve the main question more effectively. "
+#            "Each expert should generate a distinct question aimed at uncovering more relevant information for the main question."
         )
-    
         decomposed_query_schema = {
             "name": "decomposed_query_response",
             "schema": {
@@ -699,21 +752,130 @@ class DiscussionUnit(BaseUnit):
         response = agent.chat(
             decompose_prompt, 
             return_dict=decomposed_query_schema,
-            save=False  # TODO(dainiu): look into the save flag, does the agent need to look at history when decomposing a question?
+            save='decompose_query' in save
         )
-        return response['Query']
+        # Encode the current query
+        current_query = response['Query']
+        current_embedding = self.search_unit.retriever._medcpt_query_encode(current_query)
+        
+        return current_query, current_embedding
+    
+    def generate_new_query(self, agent: LLMAgent, current_query: str, previous_questions: List[str], save: List[str]) -> Tuple[str, List[float]]:
+        """Generates a new query when the current one is too similar to previous queries.
+        
+        Args:
+            agent (LLMAgent): The expert agent generating the query.
+            current_query (str): The currently generated query.
+            previous_questions (List[str]): List of previously asked questions.
+            save (List[str]): List of stages to save in agent memory.
+            
+        Returns:
+            Tuple[str, List[float]]: The new query and its embedding.
+        """
+        decomposed_query_schema = {
+            "name": "decomposed_query_response",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "Query": {"type": "string"}
+                },
+                "required": ["Query"],
+                "additionalProperties": False
+            },
+            "strict": True
+        }
+        
+        clarify_prompt = (
+            f"Your previous question '{current_query}' is too similar to questions already asked.\n"
+            f"Please generate a completely different question that explores a new aspect of the main problem.\n"
+            f"Previous questions include: {', '.join(previous_questions)}\n"
+            f"Ensure your new question addresses a unique angle not covered by these questions."
+        )
+        new_response = agent.chat(
+            clarify_prompt,
+            return_dict=decomposed_query_schema,
+            save='decompose_query' in save
+        )
+        
+        # Re-encode the new query
+        new_query = new_response['Query']
+        new_embedding = self.search_unit.retriever._medcpt_query_encode(new_query)
 
-    # TODO(dainiu): Do we need to run this for each round of debate?
-    def decomposed_rag(self, question, choices, rewrite=False, review=False):
+        if 'decompose_query' in save:
+            agent.memory[-1] = {'role': 'assistant', 'content': json.dumps(new_response)}
+            
+        return new_query, new_embedding
+    
+    def reuse_documents(self, similar_idx: int) -> List[str]:
+        """Reuses documents from a similar previous query.
+        
+        Args:
+            similar_idx (int): Index of the similar query in q_a_pairs.
+            
+        Returns:
+            List[str]: The documents from the similar query.
+        """
+        # Extract documents from the similar query
+        similar_documents = self.q_a_pairs[similar_idx]['documents']
+        return similar_documents
+    
+    def handle_similar_query(self, agent: LLMAgent, current_query: str, current_embedding: List[float], save: List[str]) -> Tuple[str, List[float], Optional[List[str]]]:
+        """Handles the case when a generated query is too similar to previous queries.
+        
+        Args:
+            agent (LLMAgent): The expert agent generating the query.
+            current_query (str): The currently generated query.
+            current_embedding (List[float]): The embedding of the current query.
+            save (List[str]): List of stages to save in agent memory.
+            
+        Returns:
+            Tuple[str, List[float], Optional[List[str]]]: The potentially revised query, its embedding, and reused documents if applicable.
+        """
+        # Check if there are previous queries to compare with
+        if not self.q_a_pairs:
+            return current_query, current_embedding, None
+            
+        # Extract previous questions and encode them
+        previous_questions = [pair['question'] for pair in self.q_a_pairs]
+        previous_embeddings = [pair['embedding'] for pair in self.q_a_pairs]
+        
+        # Calculate similarity between current query and previous queries
+        max_similarity, max_idx = _calculate_query_similarity(current_embedding, previous_embeddings)
+        
+        if max_similarity > self.args.query_similarity_threshold:            
+            if self.args.decomposed_query_strategy == 'reuse':
+                # Reuse the documents from the similar query
+                reused_documents = self.reuse_documents(max_idx)
+                return current_query, current_embedding, reused_documents
+            
+            elif self.args.decomposed_query_strategy == 'generate':
+                # Generate a new query if too similar
+                new_query, new_embedding = self.generate_new_query(agent, current_query, previous_questions, save)
+                return new_query, new_embedding, None
+            
+            # If strategy is 'none', we just keep the current query as is
+            
+        return current_query, current_embedding, None
+
+    def decomposed_rag(self, question, choices, rewrite=False, review=False, save=[]):
         for agent, weight in self.agents.values():
-            decomposed_query = self.decompose_query(question, choices, agent, self.q_a_pairs)
-            if rewrite == "Both":
-                decomposed_documents = (
-                    self.search_unit.run(decomposed_query, choices, rewrite=False, review=review) +
-                    self.search_unit.run(decomposed_query, choices, rewrite=True, review=review)
-                )
+            # Step 1: Generate decomposed query
+            decomposed_query, query_embedding = self.decompose_query(question, choices, agent, self.q_a_pairs, save)
+            
+            # Step 2: Handle similar queries
+            final_query, final_embedding, reused_documents = self.handle_similar_query(agent, decomposed_query, query_embedding, save)
+            
+            # Step 3: Retrieve documents if not reusing
+            if reused_documents is None:
+                if rewrite == "Both":
+                    decomposed_documents = (
+                        self.search_unit.run(final_query, choices, rewrite=True, review=review) +
+                        self.search_unit.run(final_query, choices, rewrite=False, review=review)
+                    )
+                else:
+                    decomposed_documents = self.search_unit.run(final_query, choices, rewrite=rewrite, review=review)
             else:
-                decomposed_documents = self.search_unit.run(decomposed_query, choices, rewrite=rewrite, review=review)
+                decomposed_documents = reused_documents
             joined_documents = "\n".join(decomposed_documents)
             rag_prompt = (
                 "The following is a decomposed medical question by an expert. Provide a concise yet informative answer based on the relevant document and original question.\n\n"
@@ -721,15 +883,17 @@ class DiscussionUnit(BaseUnit):
                 f"Question:\n{decomposed_query}\n"
                 "Answer:"
             )
-            decomposed_answer = agent.chat(rag_prompt, save=False)  # TODO(dainiu): look into the save flag, does the agent need to look at history when decomposing a question?
+            decomposed_answer = agent.chat(rag_prompt, save='decompose_answer' in save) # each agent save their decomposed question and answer
             self.q_a_pairs.append({
                 'domain': agent.domain,
                 'weight': weight,
                 'question': decomposed_query,
-                'answer': decomposed_answer
+                'embedding': query_embedding,
+                'answer': decomposed_answer,
+                'documents': joined_documents
             })
 
-    def get_expert_response(self, domain: str, question: str, choices: Dict[str, str], og_documents: str, round_num: int, summary: str) -> Dict[str, Any]:
+    def get_expert_response(self, domain: str, question: str, choices: Dict[str, str], og_documents: str, round_num: int, summary: str, save: List[str]) -> Dict[str, Any]:
         """Gets an expert's response for a debate round using JSON mode.
 
         Args:
@@ -803,7 +967,7 @@ class DiscussionUnit(BaseUnit):
                 for pair in self.q_a_pairs:
                     user_prompt += f"- Domain: {pair['domain']}\n  - Question: {pair['question']}\n  - Answer: {pair['answer']}\n\n"
             
-            response = agent.chat(user_prompt, return_dict=expert_response_schema, save=False)
+            response = agent.chat(user_prompt, return_dict=expert_response_schema, save='debate' in save)
             return response
         else:
             # Adaptive RAG
@@ -816,35 +980,91 @@ class DiscussionUnit(BaseUnit):
                     save=False,
                     tools=tools
                 )
+                retrieved_docs = ""
                 if hasattr(retrieval_response, 'tool_calls') and retrieval_response.tool_calls:
-                    tool_call = retrieval_response.tool_calls[0]
-                    if tool_call.function.name == "search_medical_knowledge":
-                        tool_args = json.loads(tool_call.function.arguments)
-                        query = tool_args.get("query", question)
-                        rewrite = tool_args.get("options", {}).get("rewrite", self.args.rewrite)
-                        retrieved_docs = "\n".join(self.search_unit.run(query, choices, rewrite=rewrite, review=self.args.review))
-                response_user_prompt = f"Considering summaries of previous discussions from other experts and the retrieved information, update your answer.\n"
-                response_user_prompt += f"Question: {_format_question(question, choices)}\n"
-                response_user_prompt += f"Debate Summaries:\n{summary}\n"
-                response_user_prompt += f"Retrieved Information:\n{retrieved_docs}\n"
+                    # Calculate documents per query based on total number of tool calls
+                    num_tool_calls = len([tc for tc in retrieval_response.tool_calls if tc.function.name == "search_medical_knowledge"])
+                    docs_per_query = self.args.rerank_topk // max(1, num_tool_calls)
+                    
+                    for tool_call in retrieval_response.tool_calls:
+                        if tool_call.function.name == "search_medical_knowledge":
+                            tool_args = json.loads(tool_call.function.arguments)
+                            query = tool_args.get("query", question)
+                            query_embedding = self.search_unit.retriever._medcpt_query_encode(query)
+                            
+                            # Check if the query is similar to any previously decomposed queries
+                            if self.q_a_pairs:
+                                previous_embeddings = [p['embedding'] for p in self.q_a_pairs]
+                                if previous_embeddings:
+                                    max_similarity, max_idx = _calculate_query_similarity(query_embedding, previous_embeddings)
+                            
+                            # If similarity exceeds threshold, apply the appropriate strategy
+                            if max_similarity > self.args.query_similarity_threshold:
+                                similar_query = self.q_a_pairs[max_idx]['question']
+                                print(f"Found similar query: {similar_query} | Similarity score: {max_similarity}")
+                                previous_questions = [p['question'] for p in self.q_a_pairs]
+                                
+                                if self.args.adaptive_query_strategy == "reuse":
+                                    # Reuse the documents from the similar query in q_a_pairs using the max_idx
+                                    reused_docs = self.q_a_pairs[max_idx].get('documents', [])
+                                    query = similar_query
+                                elif self.args.adaptive_query_strategy == "generate":
+                                    # Generate a new query
+                                    clarify_prompt = (
+                                        f"Your previous question '{query}' is too similar to questions already asked.\n"
+                                        f"Please generate a completely different question that explores a new aspect of the main problem.\n"
+                                        f"Previous questions include: {', '.join(previous_questions)}\n"
+                                        f"Ensure your new question addresses a unique angle not covered by these questions."
+                                    )
+                                    new_query_response = agent.chat(
+                                        clarify_prompt,
+                                        save=False
+                                    )
+                                    query = new_query_response.content
+                                    query_embedding = self.search_unit.retriever._medcpt_query_encode(query)
+                            
+                            # If we're reusing documents, use those instead of retrieving new ones
+                            if reused_docs:
+                                new_docs = reused_docs[:docs_per_query]
+                            else:
+                                rewrite = tool_args.get("options", {}).get("rewrite", self.args.rewrite)
+                                new_docs = self.search_unit.run(query, choices, rewrite=rewrite, review=self.args.review)
+                                
+                                # Store the query, embedding, and documents in q_a_pairs if not already similar to existing queries
+                                if max_similarity <= self.args.query_similarity_threshold:
+                                    self.q_a_pairs.append({
+                                        'domain': agent.domain,
+                                        'question': query,
+                                        'embedding': query_embedding,
+                                        'documents': new_docs,
+                                        'answer': ''  # Will be filled later if needed
+                                    })
+                            
+                            if retrieved_docs:
+                                retrieved_docs += "\n\n"
+                            retrieved_docs += f"Query: {query}\nRetrieved Documents:\n" + "\n".join(new_docs)
+                
+                response_user_prompt = f"Considering summaries of previous discussions from other experts and the retrieved information, update your answer.\n\n"
+                response_user_prompt += f"Question: {_format_question(question, choices)}\n\n"
+                response_user_prompt += f"Debate Summaries:\n{summary}\n\n"
+                response_user_prompt += f"Retrieved Information:\n{retrieved_docs}\n\n"
             else:
-                response_user_prompt = f"Considering summaries of previous discussions from other experts, update your answer.\n"
-                response_user_prompt += f"Question: {_format_question(question, choices)}\n"
-                response_user_prompt += f"Debate Summaries:\n{summary}\n"
+                response_user_prompt = f"Considering summaries of previous discussions from other experts, update your answer.\n\n"
+                response_user_prompt += f"Question: {_format_question(question, choices)}\n\n"
+                response_user_prompt += f"Debate Summaries:\n{summary}\n\n"
             response_user_prompt += "Please think step-by-step and provide your output."
-            response = agent.chat(response_user_prompt, return_dict=expert_response_schema, save=False)
+            response = agent.chat(response_user_prompt, return_dict=expert_response_schema, save='debate' in save)
             return response
 
     def run(self, question: str, choices: Dict[str, str], max_round: int = 5) -> List[Any]:
         if self.args.decomposed_rag == "True":
-            self.decomposed_rag(question, choices, rewrite=self.args.rewrite, review=self.args.review)
-
+            self.decomposed_rag(question, choices, rewrite=self.args.rewrite, review=self.args.review, save=self.args.agent_memory)
+    
         answer_by_turns = []
         chat_history = [{agent: "" for agent in self.agents.keys()} for _ in range(max_round)]
         chat_history_summary = []
         og_documents = "\n".join(self.search_unit.run(question, choices, rewrite=self.args.rewrite, review=self.args.review))
-        print("og_documents:")
-        print(og_documents)
+        print(f"og_documents: {og_documents[:self.args.splice_length]}")
 
         for r in range(max_round):
             print("-"*50)
@@ -857,7 +1077,8 @@ class DiscussionUnit(BaseUnit):
                     choices,
                     og_documents,
                     r,
-                    "\n".join([f"{i+1}{'st' if i == 0 else 'nd' if i == 1 else 'rd' if i == 2 else 'th'} debate summary: {chat}" for i, chat in enumerate(chat_history_summary)])
+                    "\n".join([f"{i+1}{'st' if i == 0 else 'nd' if i == 1 else 'rd' if i == 2 else 'th'} debate summary: {chat}" for i, chat in enumerate(chat_history_summary)]),
+                    save=self.args.agent_memory
                 )
                 chat_history[r][domain] = response
 

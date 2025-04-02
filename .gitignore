@@ -8,9 +8,7 @@ baselines/*/output/
 baselines/*/logs/
 # Ignore logs directory
 logs/**
-logs/**/
 output/**
-output/**/
 
 
 # Byte-compiled / optimized / DLL files

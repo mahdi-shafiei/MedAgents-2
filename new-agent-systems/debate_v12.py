@@ -33,15 +33,13 @@ llm_client = AzureOpenAI(
 )
 
 
-allowed_sources = ['cpg_2', 'statpearls_2', 'recop_2', 'textbook_2']
-sample_size = 1
-start_idx = 19
-max_workers = 1
-llm_debate_max_round = 1
+allowed_sources = ['cpg', 'statpearls', 'recop', 'textbook']
+sample_size = 100
+start_idx = 0
+max_workers = 4
+llm_debate_max_round = 3
 retrieve_topk = 100
 rerank_topk = 25
-rewrite=False
-review=False 
 gpu_ids = [0]
 voting = 'singular', # 'multi_ranked', 'multi_rated', 'multi_points'
 
@@ -157,18 +155,19 @@ class Triage_Unit:
         return specialty_list, expert_list
 
 class Search_Unit:
-    def __init__(self, retrieval_client, retrieve_topk, rerank_topk, allowed_sources):
+    def __init__(self, retrieval_client, retrieve_topk, rerank_topk, allowed_sources, device, retriever):
         self.query_formulate_agent = LLM_Agent("Query Rewriter", llm_client, "Write a medical passage that can help answer the given query. Include key information or terminology for the answer.")
         self.document_evaluate_agent = LLM_Agent("Document Evaluator", llm_client, "You are an expert in evaluating the relevance of documents to a given query.")
         self.retrieve_topk = retrieve_topk
         self.rerank_topk = rerank_topk
         self.allowed_sources = allowed_sources
         self.oom_count = 0
+        self.retriever = retriever
 
     def _retrieve_query(self, query) -> List[str]:
         retrieved_docs = []
         try:
-            docs = utils.retrieve(query, retrieval_client, self.retrieve_topk, self.rerank_topk)
+            docs = self.retriever.retrieve(query, retrieval_client, self.retrieve_topk, self.rerank_topk)
             retrieved_docs.extend(docs[:self.rerank_topk])
         except Exception as e:
             if "memory" in str(e).lower():
@@ -192,7 +191,7 @@ class Search_Unit:
         "Document: {}"
         for doc in documents:
             try:
-                response = document_evaluate_agent.chat(review_prompt.format(query, doc))
+                response = self.document_evaluate_agent.chat(review_prompt.format(query, doc))
                 if any(substring in response.lower() for substring in ["ully", "artially"]):
                     reviewed_docs.append(doc)
             except Exception as e:
@@ -313,7 +312,7 @@ class Discussion_Unit:
         answer_by_turns = []
         chat_history = [[] for _ in range(max_round)]
         chat_history_summary = []
-        og_documents = '\n'.join(self._request_search(self.question, rewrite=True, review=review))
+        og_documents = '\n'.join(self._request_search(self.question, rewrite=True, review=False))
         for r in range(max_round):
             # print("-"*50)
             # print(f"{r}th round debate start")
@@ -386,12 +385,13 @@ medqa_test = medqa_test[start_idx:start_idx+sample_size]
 queries = [f"{test['question']}\n\nOptions: (A) {test['options']['A']} (B) {test['options']['B']} (C) {test['options']['C']} (D) {test['options']['D']}" for test in medqa_test]
 results = [None] * len(queries)
 
-def process_query(query, task_number):
+def process_query(query, task_number, device, rewrite, review):
     # Initialize units
     start_time = time.time()
     triage_unit = Triage_Unit()
     specialty_list, expert_list = triage_unit._generate_specialties_list_question(query, utils.medical_specialties_gpt_selected, 5)
-    search_unit = Search_Unit(retrieval_client, retrieve_topk, rerank_topk, allowed_sources)
+    retriever = utils.MedicalRetriever(device=device)
+    search_unit = Search_Unit(retrieval_client, retrieve_topk, rerank_topk, allowed_sources, device=device, retriever=retriever)
     moderation_unit = Moderation_Unit()
     discussion_unit = Discussion_Unit(query, expert_list, search_unit, moderation_unit, llm_debate_max_round)
     discussion_unit._decomposed_rag(query, rewrite, review)
@@ -430,13 +430,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name', default='gpt-4o-mini')
     parser.add_argument('--dataset_name', default='medqa')
-    parser.add_argument('--dataset_dir', default='./data/medqa/')
+    parser.add_argument('--dataset_dir', default='./data/medqa')
     parser.add_argument('--split', default='test')
     parser.add_argument('--start_pos', type=int, default=0)
     parser.add_argument('--end_pos', type=int, default=-1)
     parser.add_argument('--output_files_folder', default='./output/')
     parser.add_argument('--num_processes', type=int, default=4)
     parser.add_argument('--method', type=str, default='debate_v12')
+    parser.add_argument('--rewrite', type=str, default='Both')
+    parser.add_argument('--review', type=bool, default=False)
     args = parser.parse_args()
 
     # Create output directories
@@ -445,7 +447,7 @@ if __name__ == "__main__":
     os.makedirs(subfolder, exist_ok=True)
 
     # Get existing output file
-    existing_output_file = os.path.join(subfolder, f"{args.model_name}-{args.dataset_name}-{args.split}-{args.method}.json")
+    existing_output_file = os.path.join(subfolder, f"{args.model_name}-{args.dataset_name}-{args.split}-{args.method}-rewrite_{args.rewrite}-review_{args.review}.json")
     if os.path.exists(existing_output_file):
         print(f"Existing output file found: {existing_output_file}")
         with open(existing_output_file, 'r') as f:
@@ -472,15 +474,17 @@ if __name__ == "__main__":
     print(f"Processing {len(medqa_test)} samples")
     queries = [f"{test['question']}\n\nOptions: (A) {test['options']['A']} (B) {test['options']['B']} (C) {test['options']['C']} (D) {test['options']['D']}" for test in medqa_test]
 
-    # Run multi-threading
+    # Run multi-threading with specific GPU assignment
     with ThreadPoolExecutor(max_workers=args.num_processes) as executor:
         futures = []
         try:
-            # Submit tasks to executor
-            future_to_index = {
-                executor.submit(process_query, query, task_number): task_number 
-                for task_number, query in enumerate(queries)
-            }
+            # Submit tasks to executor with GPU assignment (cuda:1, cuda:2, etc.)
+            future_to_index = {}
+            for task_number, query in enumerate(queries):
+                gpu_id = (task_number % args.num_processes)
+                device = f"cuda:{gpu_id}"
+                future = executor.submit(process_query, query, task_number, device, args.rewrite, args.review)
+                future_to_index[future] = task_number
 
             for future in tqdm(as_completed(future_to_index), total=len(future_to_index), desc="Processing queries"):
                 idx = future_to_index[future]
