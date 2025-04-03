@@ -29,16 +29,24 @@ for dataset in medqa; do
                 --output_files_folder ./output/ \
                 --gpu_ids 4 5 6 7 \
                 --num_processes 4 \
-                --llm_debate_max_round 3 \
+                --num_experts 3 \
+                --llm_debate_max_round 2 \
                 --retrieve_topk 100 \
                 --rerank_topk 32 \
-                --rewrite Both \
-                --review False \
-                --adaptive_rag True \
-                --naive_rag True \
-                --decomposed_rag True \
-                --agent_memory False \
-                --splice_length 500  > $log_file 2> $error_file
+                --rewrite True\
+                --gather_knowledge True \
+                --adaptive_rag auto \
+                --similarity_strategy reuse \
+                --agent_memory True \
+                --device cpu \
+                --splice_length 500 \
+                --temperature 0 \
+                --top_p 0.95 \
+                --max_tokens 16384 \
+                --presence_penalty 0.0 \
+                --frequency_penalty 0.0 \
+                --max_retries 5 \
+                --query_similarity_threshold 0.85 > $log_file 2> $error_file
             done
         done
     done
