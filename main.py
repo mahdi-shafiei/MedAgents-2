@@ -30,12 +30,15 @@ def load_jsonl(file_path: str) -> List[Dict]:
     return data
 
 def process_query(problem, args, process_idx):
-    # Set device for this process based on its index
-    device = f"cuda:{args.gpu_ids[process_idx % len(args.gpu_ids)]}" if torch.cuda.is_available() and args.gpu_ids else args.device
+    # Check CUDA availability before using GPU
+    if torch.cuda.is_available() and args.gpu_ids:
+        device = f"cuda:{args.gpu_ids[process_idx % len(args.gpu_ids)]}"
+    else:
+        device = args.device
     
     retriever = MedCPTRetriever(device)
     triage_unit = TriageUnit(args)
-    expert_list = triage_unit.run(problem['question'], problem['options'], MEDICAL_SPECIALTIES_GPT_SELECTED, 5)
+    expert_list = triage_unit.run(problem['question'], problem['options'], MEDICAL_SPECIALTIES_GPT_SELECTED, args.num_experts)
     search_unit = SearchUnit(args, retriever, device)
     moderation_unit = ModerationUnit(args)
     discussion_unit = DiscussionUnit(args, expert_list, search_unit, moderation_unit)
@@ -59,7 +62,9 @@ def parse_args():
                         help='Number of processes')
     parser.add_argument('--allowed_sources', nargs='+', default=['cpg', 'statpearls', 'recop', 'textbooks'],
                         help='List of allowed source types')
-    parser.add_argument('--llm_debate_max_round', type=int, default=1,
+    parser.add_argument('--num_experts', type=int, default=3,
+                        help='Number of experts to select')
+    parser.add_argument('--llm_debate_max_round', type=int, default=2,
                         help='Maximum debate rounds')
     parser.add_argument('--retrieve_topk', type=int, default=100,
                         help='Top k documents to retrieve')
@@ -81,24 +86,20 @@ def parse_args():
                         help='Frequency penalty for LLM generation')
     parser.add_argument('--max_retries', type=int, default=5,
                         help='Maximum retries for LLM generation')
-    parser.add_argument('--rewrite', type=str, choices=['True', 'False', 'Both',], default='False',
-                        help='Whether to use rewritten query, original query, or both')
-    parser.add_argument('--review', type=str, choices=['True', 'False'], default='False',
+    parser.add_argument('--rewrite', type=bool, default=False,
+                        help='Whether to use rewritten query')
+    parser.add_argument('--review', type=bool, default=False,
                         help='Whether to review')
-    parser.add_argument('--naive_rag', type=str, choices=['True', 'False'], default='False',
-                        help='Whether to use naive RAG at the beginning of the process')
-    parser.add_argument('--decomposed_rag', type=str, choices=['True', 'False'], default='False',
-                        help='Whether to use decomposed RAG at the beginning of the process')
-    parser.add_argument('--adaptive_rag', type=str, choices=['True', 'False'], default='False',
-                        help='Whether to use adaptive rag during the debate')
+    parser.add_argument('--gather_knowledge', type=bool, default=False,
+                        help='Whether to use knowledge gathering at the beginning of the process')
+    parser.add_argument('--adaptive_rag', type=str, choices=['auto', 'required', 'none'], default='none',
+                        help='RAG strategy during debate: auto (context-aware), required (always), or none')
     parser.add_argument('--query_similarity_threshold', type=float, default=0.85,
                         help='Similarity threshold for detecting similar queries in decomposed,adaptive RAG')
-    parser.add_argument('--decomposed_query_strategy', type=str, choices=['reuse', 'generate', 'none'], default='rewrite',
-                        help='Strategy for handling similar queries in decomposed RAG')
-    parser.add_argument('--adaptive_query_strategy', type=str, choices=['reuse', 'generate', 'none'], default='reuse',
-                        help='Strategy for handling similar queries in adaptive RAG')
-    parser.add_argument('--agent_memory', type=str, nargs='+', default=['decompose_query', 'decompose_answer', 'debate'],
-                        help='List of stages to save (e.g., decompose, triage, debate)')
+    parser.add_argument('--similarity_strategy', type=str, choices=['reuse', 'generate', 'none'], default='reuse',
+                        help='Strategy for handling similar queries in RAG')
+    parser.add_argument('--agent_memory', type=bool, default=True,
+                        help='Whether to save agent memory during the process')
     parser.add_argument('--device', type=str, default="cuda" if torch.cuda.is_available() else "cpu",
                         help='Default device to use (cuda or cpu) when not using per-process GPU allocation')
     parser.add_argument('--splice_length', type=int, default=500,
@@ -117,7 +118,7 @@ if __name__ == "__main__":
     date_folder = datetime.now().strftime("%Y%m%d")
     subfolder = os.path.join(args.output_files_folder, args.dataset_name, date_folder)
     os.makedirs(subfolder, exist_ok=True)
-    existing_output_file = os.path.join(args.output_files_folder, args.dataset_name, date_folder, f"{args.model_name}-{args.dataset_name}-{args.split}-rounds-{args.llm_debate_max_round}-retrieve-{args.retrieve_topk}-rerank-{args.rerank_topk}-rewrite-{args.rewrite}-review-{args.review}-adaptive-{args.adaptive_rag}-naive-{args.naive_rag}-decomposed-{args.decomposed_rag}-agent-memory-{args.agent_memory}.json")
+    existing_output_file = os.path.join(args.output_files_folder, args.dataset_name, date_folder, f"{args.model_name}-{args.dataset_name}-{args.split}-rounds-{args.llm_debate_max_round}-retrieve-{args.retrieve_topk}-rerank-{args.rerank_topk}-rewrite-{args.rewrite}-review-{args.review}-adaptive_rag-{args.adaptive_rag}-similarity_strategy-{args.similarity_strategy}-gather_knowledge-{args.gather_knowledge}-agent_memory-{args.agent_memory}.json")
     
     if os.path.exists(existing_output_file):
         print(f"Existing output file found: {existing_output_file}")
@@ -136,7 +137,11 @@ if __name__ == "__main__":
     problems_to_process = [problem for problem in problems if problem['realidx'] not in processed_realidx]
 
     print(f"Processing {len(problems_to_process)} problems out of {len(problems)} total problems.")
-    print(f"Using GPUs: {args.gpu_ids}")
+    if torch.cuda.is_available() and args.gpu_ids:
+        print(f"Using GPUs: {args.gpu_ids}")
+    else:
+        print("Using CPU")
+        args.device = "cpu"
 
     
     with ThreadPoolExecutor(max_workers=args.num_processes) as executor:
