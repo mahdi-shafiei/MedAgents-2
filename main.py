@@ -6,14 +6,12 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from tqdm.auto import tqdm
 import torch
-from constants import MEDICAL_SPECIALTIES_GPT_SELECTED
+from constants import MEDICAL_SPECIALTIES_GPT_SELECTED, DIFFICULTY_TO_PARAMETERS
 from dotenv import load_dotenv
 from retriever import MedCPTRetriever
 from agent import TriageUnit, SearchUnit, ModerationUnit, DiscussionUnit
 
 load_dotenv()
-
-FORMAT_INST = "Reply EXACTLY with the following JSON format.\n{format}\nDO NOT MISS ANY REQUEST FIELDS and ensure that your response is a well-formed JSON object!\n"
 
 def save_results(results, existing_output_file):
     results = sorted(results, key=lambda x: x['realidx'])
@@ -39,11 +37,12 @@ def process_query(problem, args, process_idx):
     start_time = datetime.now()
     retriever = MedCPTRetriever(device)
     triage_unit = TriageUnit(args)
-    expert_list = triage_unit.run(problem['question'], problem['options'], MEDICAL_SPECIALTIES_GPT_SELECTED, args.num_experts)
+    difficulty = triage_unit.assess_difficulty(problem['question'], problem['options'])
+    expert_list = triage_unit.run(problem['question'], problem['options'], MEDICAL_SPECIALTIES_GPT_SELECTED, DIFFICULTY_TO_PARAMETERS[difficulty]['num_experts'])
     search_unit = SearchUnit(args, retriever, device)
     moderation_unit = ModerationUnit(args)
     discussion_unit = DiscussionUnit(args, expert_list, search_unit, moderation_unit)
-    results = discussion_unit.run(problem['question'], problem['options'], args.llm_debate_max_round)
+    results = discussion_unit.run(problem['question'], problem['options'], DIFFICULTY_TO_PARAMETERS[difficulty]['max_round'], DIFFICULTY_TO_PARAMETERS[difficulty]['gather_knowledge'])
     token_usage = discussion_unit.calculate_token_usage()
     search_token_usage = search_unit.calculate_token_usage()
     if search_token_usage:
@@ -75,10 +74,6 @@ def parse_args():
                         help='Number of processes')
     parser.add_argument('--allowed_sources', nargs='+', default=['cpg', 'statpearls', 'recop', 'textbooks'],
                         help='List of allowed source types')
-    parser.add_argument('--num_experts', type=int, default=3,
-                        help='Number of experts to select')
-    parser.add_argument('--llm_debate_max_round', type=int, default=2,
-                        help='Maximum debate rounds')
     parser.add_argument('--retrieve_topk', type=int, default=100,
                         help='Top k documents to retrieve')
     parser.add_argument('--rerank_topk', type=int, default=25,
@@ -103,8 +98,6 @@ def parse_args():
                         help='Whether to use rewritten query')
     parser.add_argument('--review', type=bool, default=False,
                         help='Whether to review')
-    parser.add_argument('--gather_knowledge', type=bool, default=False,
-                        help='Whether to use knowledge gathering at the beginning of the process')
     parser.add_argument('--adaptive_rag', type=str, choices=['auto', 'required', 'none'], default='none',
                         help='RAG strategy during debate: auto (context-aware), required (always), or none')
     parser.add_argument('--query_similarity_threshold', type=float, default=0.85,
@@ -131,7 +124,7 @@ if __name__ == "__main__":
     date_folder = datetime.now().strftime("%Y%m%d")
     subfolder = os.path.join(args.output_files_folder, args.dataset_name, date_folder)
     os.makedirs(subfolder, exist_ok=True)
-    existing_output_file = os.path.join(args.output_files_folder, args.dataset_name, date_folder, f"{args.model_name}-{args.dataset_name}-{args.split}-rounds-{args.llm_debate_max_round}-retrieve-{args.retrieve_topk}-rerank-{args.rerank_topk}-rewrite-{args.rewrite}-review-{args.review}-adaptive_rag-{args.adaptive_rag}-similarity_strategy-{args.similarity_strategy}-gather_knowledge-{args.gather_knowledge}-agent_memory-{args.agent_memory}.json")
+    existing_output_file = os.path.join(args.output_files_folder, args.dataset_name, date_folder, f"{args.model_name}-{args.dataset_name}-{args.split}-retrieve-{args.retrieve_topk}-rerank-{args.rerank_topk}-rewrite-{args.rewrite}-review-{args.review}-adaptive_rag-{args.adaptive_rag}-similarity_strategy-{args.similarity_strategy}-agent_memory-{args.agent_memory}.json")
     
     if os.path.exists(existing_output_file):
         print(f"Existing output file found: {existing_output_file}")
@@ -166,8 +159,14 @@ if __name__ == "__main__":
                            total=len(future_to_index),
                            desc="Processing queries",
                            unit="problem"):
-            result = future.result()
-            results.append(result)
-            save_results(results, existing_output_file)
+            try:
+                result = future.result()
+                results.append(result)
+                save_results(results, existing_output_file)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                print(f"Error processing problem {future.result()}: {e}")
+                continue
     print(f"Saved {len(results)} results to {existing_output_file}")
     save_results(results, existing_output_file)
