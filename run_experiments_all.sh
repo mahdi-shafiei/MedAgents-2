@@ -11,10 +11,10 @@ LOGS_DIR=logs
 DATA_DIR=data
 
 #for dataset in medqa medmcqa pubmedqa medbullets mmlu-pro mmlu; do
-for dataset in medqa; do
+for dataset in medqa pubmedqa medbullets; do
     mkdir -p $LOGS_DIR/$dataset
     for model in gpt-4o-mini; do
-        for split in sample_1_hard; do #sample_1_hard, test_hard
+        for split in test_hard; do #sample_1_hard, test_hard
             for difficulty in adaptive; do
                 date_folder=$(date +"%Y%m%d")
                 mkdir -p $LOGS_DIR/$dataset/$date_folder
@@ -29,7 +29,7 @@ for dataset in medqa; do
                 --output_files_folder ./output/ \
                 --gpu_ids 4 5 6 7 \
                 --num_processes 4 \
-                --num_experts 3 \
+                --num_experts 5 \
                 --llm_debate_max_round 2 \
                 --retrieve_topk 100 \
                 --rerank_topk 32 \

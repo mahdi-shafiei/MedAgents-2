@@ -36,6 +36,7 @@ def process_query(problem, args, process_idx):
     else:
         device = args.device
     
+    start_time = datetime.now()
     retriever = MedCPTRetriever(device)
     triage_unit = TriageUnit(args)
     expert_list = triage_unit.run(problem['question'], problem['options'], MEDICAL_SPECIALTIES_GPT_SELECTED, args.num_experts)
@@ -43,6 +44,18 @@ def process_query(problem, args, process_idx):
     moderation_unit = ModerationUnit(args)
     discussion_unit = DiscussionUnit(args, expert_list, search_unit, moderation_unit)
     results = discussion_unit.run(problem['question'], problem['options'], args.llm_debate_max_round)
+    token_usage = discussion_unit.calculate_token_usage()
+    search_token_usage = search_unit.calculate_token_usage()
+    if search_token_usage:
+        for key, value in search_token_usage.items():
+            if key in token_usage:
+                token_usage[key] += value
+            else:
+                token_usage[key] = value
+    problem['token_usage'] = token_usage
+    end_time = datetime.now()
+    time_taken = (end_time - start_time).total_seconds()
+    problem['time_taken'] = time_taken
     problem['answer_by_turns'] = results
     return problem
 
