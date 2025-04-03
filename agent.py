@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 from pymilvus import MilvusClient
 from retriever import MedCPTRetriever, calculate_query_similarity
-from constants import FORMAT_INST, SEARCH_TOOL, DECOMPOSE_QUERY_SCHEMA, EXPERT_RESPONSE_SCHEMA, MODERATOR_RESPONSE_SCHEMA
+from constants import SEARCH_TOOL, DECOMPOSE_QUERY_SCHEMA, EXPERT_RESPONSE_SCHEMA, MODERATOR_RESPONSE_SCHEMA, DIFFICULTY_ASSESSMENT_SCHEMA
 import logging
 import colorama
 from colorama import Fore, Style
@@ -175,7 +175,7 @@ class BaseUnit(ABC):
 
     def calculate_token_usage(self):
         token_usage = {'all': {'prompt_tokens': 0, 'completion_tokens': 0}}
-        for agent in self.agents.values():
+        for agent, weight in self.agents.values():
             token_usage['all']['prompt_tokens'] += agent.token_usage['prompt_tokens']
             token_usage['all']['completion_tokens'] += agent.token_usage['completion_tokens']
             token_usage[agent.domain] = agent.token_usage
@@ -188,9 +188,10 @@ class TriageUnit(BaseUnit):
     This unit uses LLM agents to analyze medical questions and determine not only the most appropriate 
     medical specialties but also to construct detailed expert profiles. Each profile includes a special 
     job title, past experiences, educational background, and core specialties that will serve as the system 
-    prompt for that expert. It contains two agents:
+    prompt for that expert. It contains three agents:
     - QuestionClassifier: Analyzes the question text to determine relevant specialties and generate expert profiles.
     - OptionClassifier: Analyzes both question and answer options to determine relevant specialties and generate expert profiles.
+    - DifficultyAssessor: Evaluates the difficulty level of the medical question.
 
     Args:
         args (argparse.Namespace): Arguments containing LLM configuration.
@@ -203,14 +204,40 @@ class TriageUnit(BaseUnit):
                 "You are a medical expert specializing in categorizing medical scenarios into specific areas of medicine and in generating detailed expert profiles.", 
                 args
             ),
-            'OptionClassifier': LLMAgent(
-                "Options Triage", 
-                "As a medical expert, you possess the ability to discern the most relevant fields of expertise needed to address a multiple-choice question encapsulating a specific medical context, and to generate comprehensive expert profiles.", 
+            'DifficultyAssessor': LLMAgent(
+                "Difficulty Assessment",
+                "You are a medical education specialist with expertise in evaluating the difficulty level of medical questions based on complexity, required knowledge depth, and clinical reasoning demands.",
                 args
             )
         }
 
-    def triage_question(self, question: str, choices: Dict[str, str], medical_fields: List[str], num_fields: int = 5, options: str = None) -> Dict[str, Tuple[LLMAgent, float]]:
+    def assess_difficulty(self, question: str, choices: Dict[str, str]) -> str:
+        """Assesses the difficulty level of a medical question.
+
+        Args:
+            question (str): The medical question to assess.
+            choices (Dict[str, str]): The answer choices with keys like A, B, C, etc.
+
+        Returns:
+            str: Difficulty level ('easy', 'medium', or 'hard')
+        """
+
+        prompt = (
+            f"Assess the difficulty level of the following medical question:\n\n"
+            f"{_format_question(question, choices)}\n\n"
+            f"Please evaluate the question based on these criteria:\n"
+            f"1. Knowledge depth required (basic facts vs. specialized knowledge)\n"
+            f"2. Clinical reasoning complexity (straightforward vs. multi-step reasoning)\n"
+            f"3. Ambiguity level (clear vs. nuanced distinctions between options)\n"
+            f"4. Specialized terminology or concepts\n"
+            f"5. Rarity of the medical condition or treatment discussed\n\n"
+            f"Classify the question as 'easy', 'medium', or 'hard' and provide a brief justification."
+        )
+
+        response = self.agents['DifficultyAssessor'].chat(prompt, return_dict=DIFFICULTY_ASSESSMENT_SCHEMA)
+        return response["difficulty"]
+
+    def triage_question(self, question: str, choices: Dict[str, str], medical_fields: List[str], num_experts: int) -> Dict[str, Tuple[LLMAgent, float]]:
         """Classifies a medical question into relevant specialties, assigns weights, and generates detailed expert profiles.
 
         For each specialty, the expert profile must include a special job title along with details of past experience,
@@ -220,8 +247,7 @@ class TriageUnit(BaseUnit):
             question (str): The medical question to classify.
             choices (Dict[str, str]): The answer choices with keys like A, B, C, etc.
             medical_fields (List[str]): List of available medical specialties.
-            num_fields (int, optional): Number of specialties to select. Defaults to 5.
-            options (str, optional): Additional options text to consider.
+            num_experts (int): Number of experts to select.
 
         Returns:
             Dict[str, Tuple[LLMAgent, float]]: Dictionary mapping each specialty to a tuple of 
@@ -230,13 +256,13 @@ class TriageUnit(BaseUnit):
         # Build a JSON schema for the triage response that now includes expert profiles.
         properties = {}
         required_keys = []
-        for i in range(num_fields):
-            properties[f"Field {i}"] = {"type": "string"}
+        for i in range(num_experts):
+            properties[f"Expert {i}"] = {"type": "string"}
             properties[f"Weight {i}"] = {"type": "number"}
             properties[f"JobTitle {i}"] = {"type": "string"}
             properties[f"ExpertProfile {i}"] = {"type": "string"}
             properties[f"ResearchFocus {i}"] = {"type": "string"}  # Added research focus for diversity
-            required_keys.extend([f"Field {i}", f"Weight {i}", f"JobTitle {i}", f"ExpertProfile {i}", f"ResearchFocus {i}"])
+            required_keys.extend([f"Expert {i}", f"Weight {i}", f"JobTitle {i}", f"ExpertProfile {i}", f"ResearchFocus {i}"])
         triage_schema = {
             "name": "triage_response",
             "schema": {
@@ -248,69 +274,55 @@ class TriageUnit(BaseUnit):
             "strict": True
         }
         
-        if options:
-            prompt = (
-                f"You need to complete the following steps:\n"
-                f"1. Carefully review the medical scenario:\n'''{_format_question(question, choices)}'''.\n"
-                f"2. Examine the extended options provided:\n'''{options}'''. Understand how these options relate to the scenario.\n"
-                f"3. Classify the question into {num_fields} subfields chosen from: {', '.join(medical_fields)}.\n"
-                f"4. For each selected field, assign a weight between 0 and 1 (the weights must sum to 1).\n"
-                f"5. Additionally, for each field, generate a creative, CV-style expert profile along with a unique job title. The profile should be written like a professional curriculum vitae and include (each line should be a separate paragraph):\n"
-                f"   - Name: The name of the expert.\n"
-                f"   - Past Experience: Provide a detailed summary of clinical or research experience (e.g., 'BS in Biomedical Sciences from Stanford with 5 years in advanced clinical research').\n"
-                f"   - Educational Background: List academic degrees, certifications, and specialized training with specifics such as institution names and honors (e.g., 'MD from Harvard, Fellowship in Cardiology at Mayo Clinic').\n"
-                f"   - Core Specialties: Enumerate key areas of expertise with precise and creative descriptions.\n"
-                f"6. For each expert, also provide a unique research focus that distinguishes them from other experts in the same field. This should be a specific area they've published on or have special interest in.\n"
-            )
-            response = self.agents['OptionClassifier'].chat(prompt, return_dict=triage_schema)
-        else:
-            prompt = (
-                f"You need to complete the following steps:\n"
-                f"1. Read the scenario carefully:\n'''{_format_question(question, choices)}'''.\n"
-                f"2. Classify the question into {num_fields} subfields selected from: {', '.join(medical_fields)}.\n"
-                f"3. For each selected field, assign a weight between 0 and 1 (weights must sum to 1).\n"
-                f"4. Additionally, for each field, generate a creative, CV-style expert profile along with a unique job title. The profile should be written like a professional curriculum vitae and include (each line should be a separate paragraph):\n"
-                f"   - Name: The name of the expert.\n"
-                f"   - Past Experience: Provide a detailed summary of clinical or research experience (e.g., 'BS in Biomedical Sciences from Stanford with 5 years in advanced clinical research').\n"
-                f"   - Educational Background: List academic degrees, supervisors, certifications, and specialized training with specifics such as institution names and honors (e.g., 'MD from Harvard, Fellowship in Cardiology at Mayo Clinic').\n"
-                f"   - Core Specialties: Enumerate key areas of expertise with precise and creative descriptions.\n"
-                f"5. For each expert, also provide a unique research focus that distinguishes them from other experts in the same field. This should be a specific area they've published on or have special interest in.\n"
-            )
-            response = self.agents['QuestionClassifier'].chat(prompt, return_dict=triage_schema)
-        
-        specialty_list = [response[f"Field {i}"] for i in range(num_fields)]
-        weights = [float(response[f"Weight {i}"]) for i in range(num_fields)]
-        job_titles = [response[f"JobTitle {i}"] for i in range(num_fields)]
-        expert_profiles = [response[f"ExpertProfile {i}"] for i in range(num_fields)]
-        research_focuses = [response[f"ResearchFocus {i}"] for i in range(num_fields)]
+        prompt = (
+            f"You need to complete the following steps:\n"
+            f"1. Read the scenario carefully:\n'''{_format_question(question, choices)}'''.\n"
+            f"2. Classify the question into {num_experts} experts selected from: {', '.join(medical_fields)}.\n"
+            f"3. For each selected expert, assign a weight between 0 and 1 (weights must sum to 1).\n"
+            f"4. Additionally, for each expert, generate a creative, CV-style expert profile along with a unique job title. The profile should be written like a professional curriculum vitae and include (each line should be a separate paragraph):\n"
+            f"   - Name: The name of the expert.\n"
+            f"   - Past Experience: Provide a detailed summary of clinical or research experience (e.g., 'BS in Biomedical Sciences from Stanford with 5 years in advanced clinical research').\n"
+            f"   - Educational Background: List academic degrees, supervisors, certifications, and specialized training with specifics such as institution names and honors (e.g., 'MD from Harvard, Fellowship in Cardiology at Mayo Clinic').\n"
+            f"   - Core Specialties: Enumerate key areas of expertise with precise and creative descriptions.\n"
+            f"5. For each expert, also provide a unique research focus that distinguishes them from other experts in the same field. This should be a specific area they've published on or have special interest in.\n"
+        )
+        response = self.agents['QuestionClassifier'].chat(prompt, return_dict=triage_schema)
+        specialty_list = [response[f"Expert {i}"] for i in range(num_experts)]
+        weights = [float(response[f"Weight {i}"]) for i in range(num_experts)]
+        job_titles = [response[f"JobTitle {i}"] for i in range(num_experts)]
+        expert_profiles = [response[f"ExpertProfile {i}"] for i in range(num_experts)]
+        research_focuses = [response[f"ResearchFocus {i}"] for i in range(num_experts)]
             
         expert_list = {
             specialty: (
-                LLMAgent(specialty, f"You are {job_titles[i]} specializing in {specialty}. This is your expert profile:\n{expert_profiles[i]}\nYour unique research focus is: {research_focuses[i]}", args=self.args),
+                LLMAgent(specialty, f"You are {job_titles[i]} specializing in {specialty}. This is your expert profile:\n{expert_profiles[i]}\nYour unique research focus is: {research_focuses[i]}. If the question is not so related to your expertise, please give a lower confidence score.", args=self.args),
                 weights[i]
             )
             for i, specialty in enumerate(specialty_list)
         }
         return expert_list
     
-    def run(self, question: str, choices: Dict[str, str], medical_fields: List[str], num_fields: int = 5, options: str = None) -> Dict[str, Tuple[LLMAgent, float]]:
-        """Main entry point to run the triage process, which includes both specialty classification and expert profile generation.
+    def run(self, question: str, choices: Dict[str, str], medical_fields: List[str], num_experts: int) -> Tuple[Dict[str, Tuple[LLMAgent, float]], str, str]:
+        """Main entry point to run the triage process, which includes specialty classification, expert profile generation,
+        and difficulty assessment.
 
         Args:
             question (str): The medical question.
             choices (Dict[str, str]): Answer choices as a dictionary (e.g., {"A": "Option One", ...}).
             medical_fields (List[str]): Available medical specialties.
-            num_fields (int): Number of specialties to select.
-            options (str, optional): Additional options text.
+            num_experts (int): Number of experts to select.
 
         Returns:
-            Dict[str, Tuple[LLMAgent, float]]: Mapping of each specialty to a tuple of (LLMAgent with expert profile, weight).
+            Tuple[Dict[str, Tuple[LLMAgent, float]], str, str]: A tuple containing:
+                - Dictionary mapping each specialty to a tuple of (LLMAgent with expert profile, weight)
+                - Difficulty level of the question ('easy', 'medium', or 'hard')
+                - Justification for the difficulty assessment
         """
         print(f"{Fore.GREEN}Starting triage process to identify relevant medical specialties...{Style.RESET_ALL}")
-        expert_list = self.triage_question(question, choices, medical_fields, num_fields, options)
-        print(f"{Fore.GREEN}Triage complete. Selected {len(expert_list)} specialties:{Style.RESET_ALL}")
-        for specialty, (agent, weight) in expert_list.items():
-            print(f"{Fore.CYAN}  • {specialty}{Style.RESET_ALL} (weight: {Fore.YELLOW}{weight:.2f}{Style.RESET_ALL})")
+        expert_list = self.triage_question(question, choices, medical_fields, num_experts)
+        print(f"{Fore.GREEN}Triage complete. Selected {len(expert_list)} experts:{Style.RESET_ALL}")
+        for expert, (agent, weight) in expert_list.items():
+            print(f"{Fore.CYAN}  • {expert}{Style.RESET_ALL} (weight: {Fore.YELLOW}{weight:.2f}{Style.RESET_ALL})")
         return expert_list
 
 
@@ -416,11 +428,10 @@ class ModerationUnit(BaseUnit):
         else:
             decision_prompt += "This is not the final round. Provide an interim decision and note what additional information would help reach consensus."
         MODERATOR_RESPONSE_SCHEMA['schema']['properties']['answer']['enum'] = list(choices.keys())
-        print(f"\n{Fore.MAGENTA}Decision Maker analyzing expert opinions...{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}Vote Distribution: {', '.join([f'{k}: {v:.2f}' for k, v in vote_results.items()])}{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}Consensus Status: {consensus_status}{Style.RESET_ALL}")
-        
-        return self.agents['DecisionMaker'].chat(decision_prompt, return_dict=MODERATOR_RESPONSE_SCHEMA, save=True)
+        decision = self.agents['DecisionMaker'].chat(decision_prompt, return_dict=MODERATOR_RESPONSE_SCHEMA, save=True)
+        decision['vote_distribution'] = vote_results
+        decision['consensus_status'] = consensus_status
+        return decision
 
     def run(self, question: str, choices: Dict[str, str], chat_history: Dict[str, Any], agents: Dict[str, Tuple[LLMAgent, float]], final: bool = False) -> Tuple[str, Dict[str, Any]]:
         """Runs a round of discussion between experts and makes a decision.
@@ -442,6 +453,8 @@ class ModerationUnit(BaseUnit):
             answer_final = list(choices.keys())[0]
         response['answer'] = answer_final
         print(f"{Fore.GREEN}Decision: {Fore.WHITE}{answer_final}{Style.RESET_ALL} - {Fore.GREEN}Final: {Fore.WHITE}{response['isFinal']}{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}Vote Distribution: {Fore.WHITE}{', '.join([f'{k}: {v:.2f}' for k, v in response['vote_distribution'].items()])}{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}Consensus Status: {Fore.WHITE}{response['consensus_status']}{Style.RESET_ALL}")
         summary = self.summarize_discussion(chat_history, response)
         return summary, response
 
@@ -586,7 +599,7 @@ class SearchUnit(BaseUnit):
         if agent.domain:
             domain_specific_instruction = f" Focus particularly on aspects related to {agent.domain} and emphasize terminology specific to this field."
             
-        few_shot_prompt = f"..."\
+        few_shot_prompt = (
             f"Example:"\
             f""\
             f"Query: A 39-year-old woman presents to the family medicine clinic to be evaluated by her physician for weight gain. She reports feeling fatigued most of the day despite eating a healthy diet and exercising regularly. The patient smokes a half-pack of cigarettes daily and has done so for the last 23 years. She is employed as a phlebotomist by the Red Cross. She has a history of hyperlipidemia for which she takes atorvastatin. She is unaware of her vaccination history, and there is no documented record of her receiving any vaccinations. Her heart rate is 76/min, respiratory rate is 14/min, temperature is 37.3°C (99.1°F), body mass index (BMI) is 33 kg/m2, and blood pressure is 128/78 mm Hg. The patient appears alert and oriented. Lung and heart auscultation are without audible abnormalities. The physician orders a thyroid panel to determine if that patient has hypothyroidism. Which of the following recommendations may be appropriate for the patient at this time? A) Hepatitis B vaccination B) Low-dose chest CT C) Hepatitis C vaccination D) Shingles vaccination E) None of the above"\
@@ -594,17 +607,12 @@ class SearchUnit(BaseUnit):
             f""\
             f"Query: A 23-year-old male presents to his primary care physician after an injury during a rugby game. The patient states that he was tackled and ever since then has had pain in his knee. The patient has tried NSAIDs and ice to no avail. The patient has no past medical history and is currently taking a multivitamin, fish oil, and a whey protein supplement. On physical exam you note a knee that is heavily bruised. It is painful for the patient to bear weight on the knee, and passive motion of the knee elicits some pain. There is laxity at the knee to varus stress. The patient is wondering when he can return to athletics. Which of the following is the most likely diagnosis? A) Medial collateral ligament tear B) Lateral collateral ligament tear C) Anterior cruciate ligament tear D) Posterior cruciate ligament tear E) Meniscal tear F) Patellar dislocation"\
             f"Passage: Diagnosing PCL Injuries: History, Physical Examination, Imaging Studies, Arthroscopic Evaluation. Isolated posterior cruciate ligament (PCL) injuries are uncommon and can be easily missed with physical examination. The purpose of this article is to give an overview of the clinical, diagnostic and arthroscopic evaluation of a PCL injured knee. There are some specific injury mechanisms that can cause a PCL including the dashboard direct anterior blow and hyperflexion mechanisms. During the diagnostic process it is important to distinguish between an isolated or multiligament injury and whether the problem is acute or chronic. Physical examination can be difficult in an acutely injured knee because of pain and swelling, but there are specific functional tests that can indicate a PCL tear. Standard x-ray's and stress views are very useful imaging modalities"\
-            f""\
-            f"Query: A 45-year-old woman is in a high-speed motor vehicle accident and suffers multiple injuries to her extremities and abdomen. In the field, she was bleeding profusely bleeding and, upon arrival to the emergency department, she is lethargic and unable to speak. Her blood pressure on presentation is 70/40 mmHg. The trauma surgery team recommends emergency exploratory laparotomy. While the patient is in the trauma bay, her husband calls and says that the patient is a Jehovah's witness and that her religion does not permit her to receive a blood transfusion. No advanced directives are available. Which of the following is an appropriate next step? A) Provide transfusions as needed B) Withhold transfusion based on husband's request C) Obtain an ethics consult D) Obtain a court order for transfusion"\
-            f"Passage: Legal and ethical issues in safe blood transfusion. This is another D and C Act requirement which is seldom followed, possibly because there are no standard guidelines."\
-            f""\
-            f"Query: A 4-year-old male is accompanied by his mother to the pediatrician. His mother reports that over the past two weeks, the child has had intermittent low grade fevers and has been more lethargic than usual. The child's past medical history is notable for myelomeningocele complicated by lower extremity weakness as well as bowel and bladder dysfunction. He has been hospitalized multiple times at an outside facility for recurrent urinary tract infections. The child is in the 15th percentile for both height and weight. His temperature is 100.7°F (38.2°C), blood pressure is 115/70 mmHg, pulse is 115/min, and respirations are 20/min. Physical examination is notable for costovertebral angle tenderness that is worse on the right. Which of the following would most likely be found on biopsy of this patient's kidney? A) Mononuclear and eosinophilic infiltrate B) Replacement of renal parenchyma with foamy histiocytes C) Destruction of the proximal tubule and medullary thick ascending limb D) Tubular colloid casts with diffuse lymphoplasmacytic infiltrate"\
-            f"Passage: The natural history of urinary infection in adults. The vast majority of otherwise healthy adults with anatomically and functionally normal urinary tracts experience few untoward long-term consequences from symptomatic or asymptomatic UTIs. Effective early treatment of symptomatic infection rapidly curtails bacterial invasion and the resulting inflammatory response. Rarely, uncomplicated acute pyelonephritis causes suppuration and renal scarring. Urinary infections in patients with renal calculi, obstructed urinary tract, neurogenic bladder, or diabetes are frequently much more destructive and have ongoing sequelae. Strategies to treat both the infection and the complications are often necessary to alter this outcome."\
             f"..."\
             f""\
             f"Query: {query} "\
             f"{domain_specific_instruction}"\
             f"Passage:"
+        )
         return self.agents['QueryRewriter'].chat(few_shot_prompt, save=False)
 
     def find_similar_query(self, query_embedding: List[float]) -> Tuple[float, int, List[str]]:
@@ -798,10 +806,13 @@ class DiscussionUnit(BaseUnit):
         retrieved_evidence = ""
         
         if hasattr(retrieval_response, 'tool_calls') and retrieval_response.tool_calls:
+            if len(retrieval_response.tool_calls) > 2:
+                print(f"{Fore.YELLOW}Limiting to 2 tool calls out of {len(retrieval_response.tool_calls)}{Style.RESET_ALL}")
+                retrieval_response.tool_calls = retrieval_response.tool_calls[:2]
             num_tool_calls = len([tc for tc in retrieval_response.tool_calls if tc.function.name == "search_medical_knowledge"])
             evidence_per_query = self.args.rerank_topk // max(1, num_tool_calls)
             
-            for tool_call in retrieval_response.tool_calls[:2]:
+            for tool_call in retrieval_response.tool_calls:
                 if tool_call.function.name == "search_medical_knowledge":
                     tool_args = json.loads(tool_call.function.arguments)
                     search_query = tool_args.get("query", query)
@@ -823,7 +834,7 @@ class DiscussionUnit(BaseUnit):
             
         return retrieved_evidence
 
-    def debate(self, domain: str, question: str, choices: Dict[str, str], round_num: int, summary: str, shared_knowledge: List[Dict[str, Any]], save: bool) -> Dict[str, Any]:
+    def debate(self, domain: str, question: str, choices: Dict[str, str], round_num: int, summary: str, shared_knowledge: List[Dict[str, Any]], gather_knowledge: bool = True, save: bool = False) -> Dict[str, Any]:
         """Gets an expert's response for a debate round using JSON mode.
 
         Args:
@@ -833,6 +844,7 @@ class DiscussionUnit(BaseUnit):
             round_num (int): Current debate round number.
             summary (str): Summary of previous rounds.
             shared_knowledge (List[Dict[str, Any]]): Collective knowledge from previous queries and answers.
+            gather_knowledge (bool): Whether to gather knowledge.
             save (bool): Whether to save agent memory.
 
         Returns:
@@ -845,7 +857,7 @@ class DiscussionUnit(BaseUnit):
             prompt = f"Please analyze the following multiple-choice medical question using your expertise. Provide a systematic analysis and select the most appropriate answer from the given options. Additional reference information is provided to support your analysis.\n\n"
             prompt += f"Question: {_format_question(question, choices)}\n\n"
             
-            if self.args.gather_knowledge:
+            if gather_knowledge:
                 prompt += "Collective Expert Knowledge:\n"
                 for item in shared_knowledge:
                     prompt += f"- Domain: {item['domain']}\n  - Question: {item['question']}\n  - Answer: {item['answer']}\n"
@@ -864,7 +876,7 @@ class DiscussionUnit(BaseUnit):
         prompt += "Please provide a methodical analysis with your assessment."
         return agent.chat(prompt, return_dict=EXPERT_RESPONSE_SCHEMA, save=save)
 
-    def run(self, question: str, choices: Dict[str, str], max_round: int = 5) -> List[Any]:
+    def run(self, question: str, choices: Dict[str, str], max_round: int = 5, gather_knowledge: bool = True) -> List[Any]:
         """Main entry point to run the discussion.
         
         Args:
@@ -880,7 +892,7 @@ class DiscussionUnit(BaseUnit):
         
         # Phase 1: Pre-debate knowledge gathering
         # Each expert decomposes the question from their perspective and contributes to shared knowledge
-        if self.args.gather_knowledge:
+        if gather_knowledge:
             print(f"\n{Fore.GREEN}Phase 1: Pre-debate knowledge gathering{Style.RESET_ALL}")
             print(f"{Fore.GREEN}{'='*50}{Style.RESET_ALL}")
             print(f"{Fore.CYAN}Q: {question[:100]}...{Style.RESET_ALL}")
@@ -900,7 +912,7 @@ class DiscussionUnit(BaseUnit):
             for domain, (agent, weight) in self.agents.items():
                 print(f"\n{Fore.CYAN}Expert: {domain} (weight: {weight:.2f}){Style.RESET_ALL}")
                 summary = "\n".join([f"{i+1}{'st' if i == 0 else 'nd' if i == 1 else 'rd' if i == 2 else 'th'} debate summary: {chat}" for i, chat in enumerate(chat_history_summary)])
-                response = self.debate(domain, question, choices, r, summary, shared_knowledge, save=self.args.agent_memory)
+                response = self.debate(domain, question, choices, r, summary, shared_knowledge, gather_knowledge, save=self.args.agent_memory)
                 chat_history[r][domain] = response
                 print(f"{Fore.YELLOW}Answer: {response['answer']} | Confidence: {response['confidence']}{Style.RESET_ALL}")
                 print(f"{Fore.YELLOW}Key point: {response['justification'][:100]}...{Style.RESET_ALL}")

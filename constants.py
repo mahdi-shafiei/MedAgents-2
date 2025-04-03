@@ -29,6 +29,38 @@ EXPERT_RESPONSE_SCHEMA = {
     "strict": True
 }
 
+DIFFICULTY_ASSESSMENT_SCHEMA = {
+    "name": "difficulty_assessment",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "difficulty": {"type": "string", "enum": ["easy", "medium", "hard"]},
+            "justification": {"type": "string"}
+        },
+        "required": ["difficulty", "justification"],
+        "additionalProperties": False
+    },
+    "strict": True
+}
+
+DIFFICULTY_TO_PARAMETERS = {
+    "easy": {
+        "num_experts": 2,
+        "max_round": 2,
+        "gather_knowledge": False,
+    },
+    "medium": {
+        "num_experts": 3,
+        "max_round": 2,
+        "gather_knowledge": True,
+    },
+    "hard": {
+        "num_experts": 5,
+        "max_round": 3,
+        "gather_knowledge": True,
+    }
+}
+
 MODERATOR_RESPONSE_SCHEMA = {
     "name": "moderator_response",
     "schema": {
