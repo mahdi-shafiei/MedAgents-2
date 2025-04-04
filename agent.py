@@ -175,7 +175,9 @@ class BaseUnit(ABC):
 
     def calculate_token_usage(self):
         token_usage = {'all': {'prompt_tokens': 0, 'completion_tokens': 0}}
-        for agent, weight in self.agents.values():
+        for agent in self.agents.values():
+            if isinstance(agent, tuple):
+                agent, weight = agent
             token_usage['all']['prompt_tokens'] += agent.token_usage['prompt_tokens']
             token_usage['all']['completion_tokens'] += agent.token_usage['completion_tokens']
             token_usage[agent.domain] = agent.token_usage
@@ -426,7 +428,7 @@ class ModerationUnit(BaseUnit):
         if final:
             decision_prompt += "This is the final decision round. Provide your definitive answer with justification and limitations."
         else:
-            decision_prompt += "This is not the final round. Provide an interim decision and note what additional information would help reach consensus."
+            decision_prompt += "This is not the final round. Provide an interim decision and note what additional information would help reach consensus. If you are confident about your answer or the consensus is strong, you can also mark it as final."
         MODERATOR_RESPONSE_SCHEMA['schema']['properties']['answer']['enum'] = list(choices.keys())
         decision = self.agents['DecisionMaker'].chat(decision_prompt, return_dict=MODERATOR_RESPONSE_SCHEMA, save=True)
         decision['vote_distribution'] = vote_results

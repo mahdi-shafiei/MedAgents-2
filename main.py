@@ -48,9 +48,11 @@ def process_query(problem, args, process_idx):
     if search_token_usage:
         for key, value in search_token_usage.items():
             if key in token_usage:
-                token_usage[key] += value
+                token_usage[key]['prompt_tokens'] += value['prompt_tokens']
+                token_usage[key]['completion_tokens'] += value['completion_tokens']
             else:
                 token_usage[key] = value
+    problem['difficulty'] = difficulty
     problem['token_usage'] = token_usage
     end_time = datetime.now()
     time_taken = (end_time - start_time).total_seconds()

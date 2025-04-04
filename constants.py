@@ -34,7 +34,7 @@ DIFFICULTY_ASSESSMENT_SCHEMA = {
     "schema": {
         "type": "object",
         "properties": {
-            "difficulty": {"type": "string", "enum": ["easy", "medium", "hard"]},
+            "difficulty": {"type": "string", "enum": ["medium", "hard"]},
             "justification": {"type": "string"}
         },
         "required": ["difficulty", "justification"],
@@ -46,7 +46,7 @@ DIFFICULTY_ASSESSMENT_SCHEMA = {
 DIFFICULTY_TO_PARAMETERS = {
     "easy": {
         "num_experts": 2,
-        "max_round": 2,
+        "max_round": 1,
         "gather_knowledge": False,
     },
     "medium": {
@@ -55,7 +55,7 @@ DIFFICULTY_TO_PARAMETERS = {
         "gather_knowledge": True,
     },
     "hard": {
-        "num_experts": 5,
+        "num_experts": 3,
         "max_round": 3,
         "gather_knowledge": True,
     }

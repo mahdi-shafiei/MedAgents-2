@@ -11,7 +11,7 @@ LOGS_DIR=logs
 DATA_DIR=data
 
 #for dataset in medqa medmcqa pubmedqa medbullets mmlu-pro mmlu; do
-for dataset in medqa pubmedqa medbullets; do
+for dataset in medxpertqa-u medxpertqa-r medexqa; do
     mkdir -p $LOGS_DIR/$dataset
     for model in gpt-4o-mini; do
         for split in test_hard; do #sample_1_hard, test_hard
@@ -29,7 +29,7 @@ for dataset in medqa pubmedqa medbullets; do
                 --output_files_folder ./output/ \
                 --gpu_ids 4 5 6 7 \
                 --num_processes 4 \
-                --retrieve_topk 100 \
+                --retrieve_topk 20 \
                 --rerank_topk 32 \
                 --rewrite True\
                 --adaptive_rag auto \
