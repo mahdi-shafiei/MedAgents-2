@@ -27,7 +27,7 @@ def load_jsonl(file_path: str) -> List[Dict]:
                 data.append(json.loads(line))
     return data
 
-def process_query(problem, args, process_idx):
+def process_query(problem, args, process_idx, few_shot_examples):
     # Check CUDA availability before using GPU
     if torch.cuda.is_available() and args.gpu_ids:
         device = f"cuda:{args.gpu_ids[process_idx % len(args.gpu_ids)]}"
@@ -41,7 +41,7 @@ def process_query(problem, args, process_idx):
     expert_list = triage_unit.run(problem['question'], problem['options'], MEDICAL_SPECIALTIES_GPT_SELECTED, DIFFICULTY_TO_PARAMETERS[difficulty]['num_experts'])
     search_unit = SearchUnit(args, retriever, device)
     moderation_unit = ModerationUnit(args)
-    discussion_unit = DiscussionUnit(args, expert_list, search_unit, moderation_unit)
+    discussion_unit = DiscussionUnit(args, expert_list, search_unit, moderation_unit, few_shot_examples)
     results = discussion_unit.run(problem['question'], problem['options'], DIFFICULTY_TO_PARAMETERS[difficulty]['max_round'], DIFFICULTY_TO_PARAMETERS[difficulty]['gather_knowledge'])
     token_usage = discussion_unit.calculate_token_usage()
     search_token_usage = search_unit.calculate_token_usage()
@@ -100,6 +100,8 @@ def parse_args():
                         help='Whether to use rewritten query')
     parser.add_argument('--review', type=bool, default=False,
                         help='Whether to review')
+    parser.add_argument('--gather_evidence', type=str, choices=['decompose_rag', 'few_shot'], default='few_shot',
+                        help='Whether to gather evidence')
     parser.add_argument('--adaptive_rag', type=str, choices=['auto', 'required', 'none'], default='none',
                         help='RAG strategy during debate: auto (context-aware), required (always), or none')
     parser.add_argument('--query_similarity_threshold', type=float, default=0.85,
@@ -137,6 +139,7 @@ if __name__ == "__main__":
         results = []
 
     problems = load_jsonl(os.path.join(args.dataset_dir, args.dataset_name, f"{args.split}.jsonl"))
+    few_shot_examples = load_jsonl(os.path.join(args.dataset_dir, args.dataset_name, f"train.jsonl"))[:5]
     for idx, problem in enumerate(problems):
         if 'realidx' not in problem:
             problem['realidx'] = idx
@@ -154,7 +157,7 @@ if __name__ == "__main__":
     
     with ThreadPoolExecutor(max_workers=args.num_processes) as executor:
         future_to_index = {
-            executor.submit(process_query, problem, args, idx): idx
+            executor.submit(process_query, problem, args, idx, few_shot_examples): idx
             for idx, problem in enumerate(problems_to_process)
         }
         for future in tqdm(as_completed(future_to_index),

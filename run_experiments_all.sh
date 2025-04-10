@@ -11,7 +11,7 @@ LOGS_DIR=logs
 DATA_DIR=data
 
 #for dataset in medqa medmcqa pubmedqa medbullets mmlu-pro mmlu; do
-for dataset in medxpertqa-u medxpertqa-r medexqa; do
+for dataset in medqa; do
     mkdir -p $LOGS_DIR/$dataset
     for model in gpt-4o-mini; do
         for split in test_hard; do #sample_1_hard, test_hard
@@ -30,8 +30,8 @@ for dataset in medxpertqa-u medxpertqa-r medexqa; do
                 --gpu_ids 4 5 6 7 \
                 --num_processes 4 \
                 --retrieve_topk 20 \
-                --rerank_topk 32 \
-                --rewrite True\
+                --rerank_topk 8 \
+                --rewrite True \
                 --adaptive_rag auto \
                 --similarity_strategy reuse \
                 --agent_memory True \
@@ -43,6 +43,7 @@ for dataset in medxpertqa-u medxpertqa-r medexqa; do
                 --presence_penalty 0.0 \
                 --frequency_penalty 0.0 \
                 --max_retries 5 \
+                --gather_evidence few_shot \
                 --query_similarity_threshold 0.85 > $log_file 2> $error_file
             done
         done

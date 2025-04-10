@@ -71,11 +71,13 @@ class MedCPTRetriever:
         evidence_list = [result["entity"]["text"] for result in search_res[0][:topk]]
         return evidence_list
 
-    def retrieve_filtered_sources(self, 
-                                 query: str, 
-                                 client: Any, 
-                                 allowed_sources: List[str] = ['cpg', 'recop', 'textbooks', 'statpearls'],
-                                 topk: int = 100) -> List[str]:
+    def retrieve_filtered_sources(
+        self, 
+        query: str, 
+        client: Any, 
+        allowed_sources: List[str] = ['cpg', 'recop', 'textbooks', 'statpearls'],
+        topk: int = 100
+    ) -> List[str]:
         """
         Retrieve documents from specific sources in the vector database.
         

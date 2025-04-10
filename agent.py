@@ -711,11 +711,12 @@ class DiscussionUnit(BaseUnit):
         search_unit: Unit for retrieving relevant medical information.
         moderation_unit: Unit for moderating discussions and making decisions.
     """
-    def __init__(self, args, expert_list, search_unit, moderation_unit):
+    def __init__(self, args, expert_list, search_unit, moderation_unit, few_shot_examples):
         super().__init__(args)
         self.agents = expert_list
         self.search_unit = search_unit
         self.moderation_unit = moderation_unit
+        self.few_shot_examples = few_shot_examples
         
     def specialize_query(self, agent: LLMAgent, query: str, shared_knowledge: List[Dict[str, Any]]) -> str:
         """Generates a specialized inquiry from an expert agent to explore a specific aspect of the main question.
@@ -765,10 +766,11 @@ class DiscussionUnit(BaseUnit):
         Returns:
             List[Dict[str, Any]]: Updated shared knowledge with new evidence and answers.
         """
-        for domain, (agent, _) in self.agents.items():
-            specialized_query = self.specialize_query(agent, query, shared_knowledge)
-            evidence = self.search_unit.run(agent, specialized_query, rewrite=self.args.rewrite, review=self.args.review)
-            evidence = "\n".join(evidence)
+        if self.args.gather_evidence == 'decompose_rag':
+            for domain, (agent, _) in self.agents.items():
+                specialized_query = self.specialize_query(agent, query, shared_knowledge)
+                evidence = self.search_unit.run(agent, specialized_query, rewrite=self.args.rewrite, review=self.args.review)
+                evidence = "\n".join(evidence)
             rag_prompt = (
                 "The following is a specialized medical inquiry by an expert. Provide a concise yet informative answer based on the relevant evidence and original question.\n\n"
                 f"Relevant Evidence:\n{evidence}\n"
@@ -783,6 +785,29 @@ class DiscussionUnit(BaseUnit):
                 'answer': specialized_answer,
                 'evidence': evidence,
             })
+        elif self.args.gather_evidence == 'few_shot':
+            for domain, (agent, _) in self.agents.items():
+                # Format few-shot examples
+                few_shot_examples_text = "\n\n".join([f"Question: {example['question']}\nOptions: {example['options']}\nAnswer: {example['answer']}" for example in self.few_shot_examples])
+                
+                few_shot_prompt = (
+                    f"You are a medical expert in {agent.domain}. Review these examples and solve a new problem:\n\n"
+                    f"Examples:\n{few_shot_examples_text}\n\n"
+                    f"New question: {query}\n\n"
+                    f"Think step by step to solve this problem. First analyze the question, then apply your {agent.domain} expertise, "
+                    f"and finally provide your answer with clear reasoning.\n\n"
+                    f"Your answer:"
+                )
+
+                expert_answer = agent.chat(few_shot_prompt, save=False)
+                
+                shared_knowledge.append({
+                    'domain': agent.domain,
+                    'question': query,
+                    'answer': expert_answer,
+                    'evidence': 'Based on few-shot learning examples'
+                })
+                
         return shared_knowledge
 
     def find_evidence(self, agent: LLMAgent, query: str, shared_knowledge: List[Dict[str, Any]]) -> str:
