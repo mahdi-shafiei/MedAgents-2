@@ -31,6 +31,12 @@ llm_client = AzureOpenAI(
     api_version=os.getenv("AZURE_API_VERSION")
 )
 
+llm_client_2 = AzureOpenAI(
+    azure_endpoint=os.getenv("AZURE_ENDPOINT_2"),
+    api_key=os.getenv("AZURE_API_KEY_2"),
+    api_version=os.getenv("AZURE_API_VERSION_2")
+)
+
 def _format_question(question: str, options: Dict[str, str]) -> str:
     text = f"{question}\n\n"
     for choice, option in options.items():
@@ -60,6 +66,8 @@ class LLMAgent:
             else f"You are a medical expert in the domain of {self.domain}."
         )
         self.memory = [{'role': 'system', 'content': self.system_prompt}]
+        if args.model_name.startswith("o1-mini") or args.model_name.startswith("o3-mini"):
+            self.memory[0]['role'] = 'user'
         self.token_usage = {'prompt_tokens': 0, 'completion_tokens': 0}
         self.args = args
         self.max_retries = getattr(args, 'max_retries', 5) 
@@ -130,21 +138,31 @@ class LLMAgent:
                 request_params = {
                     "model": self.args.model_name,
                     "messages": messages,
-                    "max_tokens": self.args.max_tokens,
-                    "temperature": self.args.temperature,
-                    "top_p": self.args.top_p,
                     "seed": self.args.seed,
-                    "presence_penalty": self.args.presence_penalty,
-                    "frequency_penalty": self.args.frequency_penalty,
                 }
+                if not (self.args.model_name.startswith("o1-mini") or self.args.model_name.startswith("o3-mini")):
+                    request_params.update({
+                        "temperature": self.args.temperature,
+                        "top_p": self.args.top_p,
+                        "presence_penalty": self.args.presence_penalty,
+                        "frequency_penalty": self.args.frequency_penalty,
+                        "max_tokens": self.args.max_tokens,
+                    })
                 if tools:
                     request_params["tools"] = tools
                 if tool_choice:
                     request_params["tool_choice"] = tool_choice
                 if return_dict:
-                    request_params["response_format"] = {"type": "json_schema", "json_schema": return_dict}
+                    if self.args.model_name in ["gpt-4o-mini", "o3-mini"]:
+                        request_params["response_format"] = {"type": "json_schema", "json_schema": return_dict}
+                    else:
+                        request_params["response_format"] = {"type": "json_object"}
+                        messages[-1]['content'] += f"\n\nPlease provide your response in JSON format with the following structure: {json.dumps(return_dict['schema']['properties'])}"
 
-                response = llm_client.chat.completions.create(**request_params)
+                if self.args.model_name.startswith("o1-mini") or self.args.model_name.startswith("o3-mini"):
+                    response = llm_client_2.chat.completions.create(**request_params)
+                else:
+                    response = llm_client.chat.completions.create(**request_params)
                 self.token_usage['prompt_tokens'] += response.usage.prompt_tokens
                 self.token_usage['completion_tokens'] += response.usage.completion_tokens
 
@@ -428,7 +446,7 @@ class ModerationUnit(BaseUnit):
         if final:
             decision_prompt += "This is the final decision round. Provide your definitive answer with justification and limitations."
         else:
-            decision_prompt += "This is not the final round. Provide an interim decision and note what additional information would help reach consensus. If you are confident about your answer or the consensus is strong, you can also mark it as final."
+            decision_prompt += "This is not the final round. Provide an interim decision and note what additional information would help reach consensus."
         MODERATOR_RESPONSE_SCHEMA['schema']['properties']['answer']['enum'] = list(choices.keys())
         decision = self.agents['DecisionMaker'].chat(decision_prompt, return_dict=MODERATOR_RESPONSE_SCHEMA, save=True)
         decision['vote_distribution'] = vote_results
