@@ -9,23 +9,24 @@
 
 LOGS_DIR=logs
 DATA_DIR=data
-
-#for dataset in medqa medmcqa pubmedqa medbullets mmlu-pro mmlu; do
-for dataset in medqa; do
+RUN_ID=2
+for dataset in medqa medmcqa pubmedqa medbullets mmlu-pro mmlu medxpertqa-u medxpertqa-r medexqa; do
+# for dataset in medqa medmcqa pubmedqa medbullets mmlu-pro mmlu; do
+# for dataset in medqa; do
     mkdir -p $LOGS_DIR/$dataset
-    for model in gpt-4o-mini; do
+    for model in o3-mini; do
         for split in test_hard; do #sample_1_hard, test_hard
             for difficulty in adaptive; do
-                date_folder=$(date +"%Y%m%d")
-                mkdir -p $LOGS_DIR/$dataset/$date_folder
-                log_file=$LOGS_DIR/$dataset/$date_folder/${model}_${dataset}_${split}_${difficulty}.log
-                error_file=$LOGS_DIR/$dataset/$date_folder/${model}_${dataset}_${split}_${difficulty}.err
+                mkdir -p $LOGS_DIR/$dataset/run_$RUN_ID
+                log_file=$LOGS_DIR/$dataset/run_${RUN_ID}/${model}_${dataset}_${split}_${difficulty}.log
+                error_file=$LOGS_DIR/$dataset/run_${RUN_ID}/${model}_${dataset}_${split}_${difficulty}.err
                 echo "Running $model on $split with difficulty $difficulty"
                 python main.py \
                 --model_name $model \
                 --dataset_name $dataset \
                 --dataset_dir $DATA_DIR \
                 --split $split \
+                --run_id $RUN_ID \
                 --output_files_folder ./output/ \
                 --gpu_ids 4 5 6 7 \
                 --num_processes 4 \

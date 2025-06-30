@@ -38,6 +38,7 @@ def process_query(problem, args, process_idx, few_shot_examples):
     retriever = MedCPTRetriever(device)
     triage_unit = TriageUnit(args)
     difficulty = triage_unit.assess_difficulty(problem['question'], problem['options'])
+    print(f"Difficulty: {difficulty}")
     expert_list = triage_unit.run(problem['question'], problem['options'], MEDICAL_SPECIALTIES_GPT_SELECTED, DIFFICULTY_TO_PARAMETERS[difficulty]['num_experts'])
     search_unit = SearchUnit(args, retriever, device)
     moderation_unit = ModerationUnit(args)
@@ -60,21 +61,33 @@ def process_query(problem, args, process_idx, few_shot_examples):
     problem['answer_by_turns'] = results
     return problem
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Medical Agent System Arguments')
-    parser.add_argument('--model_name', default='gpt-4o-mini',
+    parser.add_argument('--model_name', type=str, default='gpt-4o-mini',
                         help='Model name')
+    parser.add_argument('--run_id', type=int, default=0,
+                        help='Run ID')
     parser.add_argument('--dataset_name', type=str, default='medqa',
                         help='Dataset name')
     parser.add_argument('--dataset_dir', type=str, default='./data',
                         help='Dataset directory')
     parser.add_argument('--split', type=str, default='test_hard',
                         help='Split name')
-    parser.add_argument('--output_files_folder', default='./output/',
+    parser.add_argument('--output_files_folder', type=str, default='./output/',
                         help='Output files folder')
     parser.add_argument('--num_processes', type=int, default=1,
                         help='Number of processes')
-    parser.add_argument('--allowed_sources', nargs='+', default=['cpg', 'statpearls', 'recop', 'textbooks'],
+    parser.add_argument('--allowed_sources', nargs='+', type=str, default=['cpg', 'statpearls', 'recop', 'textbooks'],
                         help='List of allowed source types')
     parser.add_argument('--retrieve_topk', type=int, default=100,
                         help='Top k documents to retrieve')
@@ -96,10 +109,10 @@ def parse_args():
                         help='Frequency penalty for LLM generation')
     parser.add_argument('--max_retries', type=int, default=5,
                         help='Maximum retries for LLM generation')
-    parser.add_argument('--rewrite', type=bool, default=False,
-                        help='Whether to use rewritten query')
-    parser.add_argument('--review', type=bool, default=False,
-                        help='Whether to review')
+    parser.add_argument('--rewrite', type=str2bool, nargs='?', const=True, default=False,
+                        help='Whether to use rewritten query (bool)')
+    parser.add_argument('--review', type=str2bool, nargs='?', const=True, default=False,
+                        help='Whether to review (bool)')
     parser.add_argument('--gather_evidence', type=str, choices=['decompose_rag', 'few_shot'], default='few_shot',
                         help='Whether to gather evidence')
     parser.add_argument('--adaptive_rag', type=str, choices=['auto', 'required', 'none'], default='none',
@@ -108,16 +121,20 @@ def parse_args():
                         help='Similarity threshold for detecting similar queries in decomposed,adaptive RAG')
     parser.add_argument('--similarity_strategy', type=str, choices=['reuse', 'generate', 'none'], default='reuse',
                         help='Strategy for handling similar queries in RAG')
-    parser.add_argument('--agent_memory', type=bool, default=True,
-                        help='Whether to save agent memory during the process')
+    parser.add_argument('--agent_memory', type=str2bool, nargs='?', const=True, default=True,
+                        help='Whether to save agent memory during the process (bool)')
     parser.add_argument('--device', type=str, default="cuda" if torch.cuda.is_available() else "cpu",
                         help='Default device to use (cuda or cpu) when not using per-process GPU allocation')
     parser.add_argument('--splice_length', type=int, default=500,
                         help='Length of response to print when splicing is enabled')
 
+    args = parser.parse_args()
 
-    return parser.parse_args()
+    # Ensure allowed_sources is always a list of strings (even if passed as a single string)
+    if isinstance(args.allowed_sources, str):
+        args.allowed_sources = [args.allowed_sources]
 
+    return args
 
 if __name__ == "__main__":
     args = parse_args()
@@ -125,10 +142,9 @@ if __name__ == "__main__":
     script_name = os.path.splitext(os.path.basename(__file__))[0]
 
     os.makedirs(args.output_files_folder, exist_ok=True)
-    date_folder = datetime.now().strftime("%Y%m%d")
-    subfolder = os.path.join(args.output_files_folder, args.dataset_name, date_folder)
+    subfolder = os.path.join(args.output_files_folder, args.dataset_name, f'run_{args.run_id}')
     os.makedirs(subfolder, exist_ok=True)
-    existing_output_file = os.path.join(args.output_files_folder, args.dataset_name, date_folder, f"{args.model_name}-{args.dataset_name}-{args.split}-retrieve-{args.retrieve_topk}-rerank-{args.rerank_topk}-rewrite-{args.rewrite}-review-{args.review}-adaptive_rag-{args.adaptive_rag}-similarity_strategy-{args.similarity_strategy}-agent_memory-{args.agent_memory}.json")
+    existing_output_file = os.path.join(subfolder, f"{args.model_name}-{args.dataset_name}-{args.split}-retrieve-{args.retrieve_topk}-rerank-{args.rerank_topk}-rewrite-{args.rewrite}-review-{args.review}-adaptive_rag-{args.adaptive_rag}-similarity_strategy-{args.similarity_strategy}-agent_memory-{args.agent_memory}-allowed_sources-{'_'.join(args.allowed_sources)}.json")
     
     if os.path.exists(existing_output_file):
         print(f"Existing output file found: {existing_output_file}")
