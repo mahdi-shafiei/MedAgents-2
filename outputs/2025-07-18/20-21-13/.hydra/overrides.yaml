@@ -1,5 +1,0 @@
-- triage.disable_triage=true
-- triage.forced_level=custom
-- triage.forced_level_custom.num_experts=2
-- triage.forced_level_custom.max_rounds=3
-- triage.forced_level_custom.search_mode=required
