@@ -9,8 +9,8 @@ from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 from pymilvus import MilvusClient
-from retriever import MedCPTRetriever, calculate_query_similarity
-from constants import SEARCH_TOOL, DECOMPOSE_QUERY_SCHEMA, EXPERT_RESPONSE_SCHEMA, MODERATOR_RESPONSE_SCHEMA, DIFFICULTY_ASSESSMENT_SCHEMA
+from retriever import calculate_query_similarity
+from schema import SEARCH_TOOL, DECOMPOSE_QUERY_SCHEMA, EXPERT_RESPONSE_SCHEMA, MODERATOR_RESPONSE_SCHEMA, DIFFICULTY_ASSESSMENT_SCHEMA
 import logging
 import colorama
 from colorama import Fore, Style

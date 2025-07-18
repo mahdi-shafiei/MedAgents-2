@@ -1,0 +1,10 @@
+# Dataset & runtime options
+run_id: 0
+dataset_name: medqa
+dataset_dir: ./data
+split: test_hard
+output_files_folder: ./output
+num_processes: 4
+gpu_ids: [4,5,6,7]
+device: ${hydra:runtime.device}  # will be overridden in code
+splice_length: 500

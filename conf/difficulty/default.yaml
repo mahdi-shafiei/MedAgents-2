@@ -1,0 +1,15 @@
+# per-level parameters. You can override these on the CLI or via multirun.
+easy:
+  num_experts: 2
+  max_round: 1
+  gather_knowledge: false
+
+medium:
+  num_experts: 3
+  max_round: 2
+  gather_knowledge: true
+
+hard:
+  num_experts: 3
+  max_round: 3
+  gather_knowledge: true
