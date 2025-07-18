@@ -1,0 +1,105 @@
+model:
+  name: gpt-4o-mini
+  seed: 42
+  temperature: 0.0
+  top_p: 0.95
+  max_tokens: 16384
+  presence_penalty: 0.0
+  frequency_penalty: 0.0
+  max_retries: 5
+retrieval:
+  tool_choice: required
+  search_history: individual
+  search_tools:
+    auto_rewrite: false
+    auto_review: false
+    allowed_sources:
+    - cpg
+    - statpearls
+    - recop
+    - textbooks
+    similarity_strategy: reuse
+    query_similarity_threshold: 0.85
+    relevance_threshold: 5
+    max_concurrent_searches: 3
+    cache_size: 100
+orchestration:
+  log_intermediate_steps: true
+  context_sharing: cross_talk
+  medical_specialties:
+  - Internal Medicine
+  - Emergency Medicine
+  - Infectious Disease
+  - Pediatrics
+  - Neurology
+  - Endocrinology
+  - Cardiology
+  - Pharmacology
+  - Pulmonology
+  - Gastroenterology
+  - Hematology
+  - Radiology
+  - Nephrology
+  - Psychiatry
+  - Oncology
+  - Genetics
+  - Dermatology
+  - Pathology
+  - Geriatrics
+  - Immunology
+  - Rheumatology
+  - Urology
+  - Obstetrics and Gynecology
+  - Surgery
+  - Preventive Medicine
+  - Critical Care Medicine
+  - Toxicology
+  - Anesthesiology
+  - Neurosurgery
+  - Family Medicine
+  - Vascular Medicine
+  - Ophthalmology
+  - Orthopedics
+  - Occupational Medicine
+  - Sports Medicine
+  - Public Health
+  - Clinical Research
+  - Sleep Medicine
+  - Allergy and Immunology
+  - Biostatistics
+  - Medical Ethics
+  - Neonatology
+  - Nutrition
+  - Epidemiology
+  - Rehabilitation Medicine
+  - Sexual Health
+  - Reproductive Medicine
+  - Transplant Medicine
+  - Clinical Pathology
+runtime:
+  run_id: 0
+  dataset_name: medqa
+  dataset_dir: ./data
+  split: test_hard
+  output_files_folder: ./output
+  num_processes: 4
+  gpu_ids:
+  - 4
+  - 5
+  - 6
+  - 7
+  device: ${hydra:runtime.device}
+  splice_length: 500
+difficulty:
+  easy:
+    num_experts: 2
+    max_round: 1
+    gather_knowledge: false
+  medium:
+    num_experts: 3
+    max_round: 2
+    gather_knowledge: true
+  hard:
+    num_experts: 3
+    max_round: 3
+    gather_knowledge: true

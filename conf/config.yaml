@@ -1,7 +1,7 @@
 # Compose all config groups
 defaults:
   - model: default
-  - retrieval: search  # Use search config instead of default
-  - orchestration: default
-  - runtime: default
-  - difficulty: default
+  - search: default
+  - orchestrate: default
+  - triage: default
+  - execution: default

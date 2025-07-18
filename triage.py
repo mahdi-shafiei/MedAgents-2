@@ -9,11 +9,12 @@ from dotenv import load_dotenv
 import hydra
 from pydantic import BaseModel, Field
 from omegaconf import DictConfig
+from natsort import natsorted
+from omegaconf import OmegaConf
 
 from openai import AsyncOpenAI
 from agents import Agent, Runner, RunResult, ModelSettings, handoff, set_default_openai_client, set_tracing_disabled, Usage
 from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX
-from schema import MEDICAL_SPECIALTIES_GPT_SELECTED
 
 # ——————————————————————————————————————————————
 # Configuration dataclass for prompts & model
@@ -28,7 +29,7 @@ class TriageOutput(BaseModel):
     difficulty: str = Field(
         ..., 
         description="Question difficulty level", 
-        pattern="^(easy|medium|hard)$"
+        pattern="^(easy|medium|hard|custom)$"
     )
     justification: str = Field(..., description="Reasoning for the assigned difficulty level")
     specialties: List[str] = Field(..., description="List of selected medical specialties")
@@ -81,27 +82,61 @@ def update_config(**kwargs):
     global _default_cfg
     _default_cfg = replace(_default_cfg, **kwargs)
 
+def get_medical_specialties(cfg: DictConfig) -> List[str]:
+    specialties = cfg.get('orchestrate', {}).get('medical_specialties', [])
+    return natsorted(set(specialties))
+
 # ——————————————————————————————————————————————
 # Triage agent runner function
 # ——————————————————————————————————————————————
 async def run_triage_agent(question: str, cfg: DictConfig):
+    # Check for ablation: disable triage and force level
+    if getattr(cfg.triage, 'disable_triage', False):
+        forced_level = getattr(cfg.triage, 'forced_level', 'easy')
+        if forced_level == 'custom':
+            forced_cfg = cfg.triage.forced_level_custom
+        else:
+            forced_cfg = cfg.triage[forced_level]
+        n = forced_cfg['num_experts']
+        specialties = get_medical_specialties(cfg)[:n]
+        weights = [1.0 / n] * n
+        job_titles = [f"Ablation Expert {i+1}" for i in range(n)]
+        expert_profiles = [
+            dict(
+                name=f"Ablation Expert {i+1}",
+                past_experience="Ablation study: profile not generated.",
+                educational_background="Ablation study: profile not generated.",
+                core_specialties="Ablation study: profile not generated."
+            ) for i in range(n)
+        ]
+        research_focuses = ["Ablation study" for _ in range(n)]
+        output = TriageOutput(
+            difficulty=forced_level,
+            justification="Ablation: triage disabled, forced level.",
+            specialties=specialties,
+            weights=weights,
+            job_titles=job_titles,
+            expert_profiles=expert_profiles,
+            research_focuses=research_focuses
+        )
+        return TriageRunResult(response=output, usage=Usage())
     # ——————————————————————————————————————————————
     # Define TriageAgent variants for each difficulty level
     # ——————————————————————————————————————————————
     def create_triage_agent(difficulty_level: str):
-        config = cfg.difficulty[difficulty_level]
+        config = cfg.triage[difficulty_level]  # config: triage.{level}
         n = config['num_experts']
-        fields = MEDICAL_SPECIALTIES_GPT_SELECTED
+        fields = get_medical_specialties(cfg)      # config: orchestrate.medical_specialties
         
         return Agent(
             name=f"TriageAgent_{difficulty_level.capitalize()}",
-            model=cfg.model.name,
+            model=cfg.model.name,                  # config: model.name
             instructions=(
                 f"{_default_cfg.triage_system_prompt}\n"
                 f"{_default_cfg.triage_template.format(question=question, fields=fields, n=n)}"
             ),
             model_settings=ModelSettings(
-                temperature=cfg.model.temperature,
+                temperature=cfg.model.temperature, # config: model.temperature
             ),
             output_type=TriageOutput,
         )
@@ -149,9 +184,12 @@ async def run_triage_agent(question: str, cfg: DictConfig):
         input=question,
         context={},
     )
+    total_usage = Usage()
+    for raw_response in result.raw_responses:
+        total_usage.add(raw_response.usage)
     return TriageRunResult(
         response=result.final_output,
-        usage=result.raw_responses[0].usage
+        usage=total_usage
     )
 
 def format_question(question: str, options: Dict[str, str]) -> str:
@@ -160,31 +198,3 @@ def format_question(question: str, options: Dict[str, str]) -> str:
     for key, value in options.items():
         text += f"({key}) {value}\n"
     return text
-
-# ——————————————————————————————————————————————
-# Test harness
-# ——————————————————————————————————————————————
-@hydra.main(version_base=None, config_path='conf', config_name='config')
-def main(cfg: DictConfig):
-    load_dotenv()
-    client = AsyncOpenAI(
-        base_url=os.getenv("OPENAI_ENDPOINT"),
-        api_key=os.getenv("OPENAI_API_KEY"),
-    )
-    set_default_openai_client(client=client, use_for_tracing=False)
-    set_tracing_disabled(disabled=True)
-
-    question = "A 64-year-old man presents to the emergency room with a headache and nausea. He reports that he was rocking his grandson to sleep when the symptoms began. He states the pain is constant and is primarily located on his right side. When asked to indicate the area of pain, he says that it surrounds his eye and upper forehead. He had one episode of vomiting. The patient also reports difficulty seeing out of his right eye, which he attributes to excessive tearing. The patient's past medical history is significant for hypertension. His medications include hydrochlorothiazide. His temperature is 98.6°F (37°C), blood pressure is 135/91 mmHg, pulse is 72/min, and respirations are 12/min. The patient's right eye is shown in Figure A. Upon physical examination, the right pupil is minimally responsive to light and the globe feels firm. A right-sided carotid bruit is appreciated. Which of the following is the most appropriate prophylaxis for this patient's condition?"
-    options = {
-        'A': 'Myocardial infarction',
-        'B': 'Angina pectoris',
-        'C': 'Pericarditis',
-        'D': 'Myocardial ischemia',
-        'E': 'None of the above',
-    }
-    formatted_question = format_question(question, options)
-    result = asyncio.run(run_triage_agent(formatted_question, cfg))
-    print("Final JSON Output:", result)
-
-if __name__ == "__main__":
-    main()

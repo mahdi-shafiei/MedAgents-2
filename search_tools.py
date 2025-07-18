@@ -14,6 +14,7 @@ import json
 import logging
 import asyncio
 import nest_asyncio
+import random
 nest_asyncio.apply()
 
 from typing import List, Dict, Any, Optional, Tuple
@@ -22,7 +23,7 @@ from dataclasses import dataclass
 import torch
 from pymilvus import MilvusClient
 from openai import AsyncOpenAI
-from agents import function_tool
+from agents import function_tool, WebSearchTool
 from agents.models import _openai_shared
 
 from retriever import MedCPTRetriever
@@ -39,9 +40,13 @@ class SearchConfig:
     rerank_topk: int = 25
     query_similarity_threshold: float = 0.85
     similarity_strategy: str = "reuse"  # "reuse", "generate", "none"
-    rewrite: bool = False
-    review: bool = False
+    rewrite: bool = False  # Only use rewrite, not auto_rewrite
+    review: bool = False  # Only use review, not auto_review
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    cache_size: int = 100
+    max_concurrent_searches: int = 3
+    relevance_threshold: int = 5
+    search_history: str = "individual"  # [none, individual, shared]
     
     def __post_init__(self):
         if self.allowed_sources is None:
@@ -215,7 +220,7 @@ class SearchTool:
         
         return response.choices[0].message.content.strip()
 
-    def get_previous_queries(self, max_length: int = 1000) -> str:
+    def get_previous_queries(self, max_length: int = 1000, max_queries: Optional[int] = None) -> str:
         """
         Get all previous queries and their retrieved documents in an organized string format.
         
@@ -228,7 +233,7 @@ class SearchTool:
         result = "Previous Search Queries and Results:\n"
         result += "=" * 50 + "\n\n"
         
-        for i, cached_item in enumerate(self._query_cache, 1):
+        for i, cached_item in enumerate(random.sample(self._query_cache, max_queries) if max_queries else self._query_cache, 1):
             result += f"Query {i}: {cached_item['query']}\n"
             result += "-" * 30 + "\n"
             
@@ -279,8 +284,8 @@ class SearchTool:
         Returns:
             List of relevant document texts
         """
-        rewrite = rewrite if rewrite is not None else self.config.rewrite
-        review = review if review is not None else self.config.review
+        rewrite = rewrite if rewrite is not None else self.config.rewrite  # config: search.rewrite
+        review = review if review is not None else self.config.review      # config: search.review
         retrieve_topk = retrieve_topk or self.config.retrieve_topk
         rerank_topk = rerank_topk or self.config.rerank_topk
         similarity_strategy = similarity_strategy or self.config.similarity_strategy
@@ -340,7 +345,7 @@ class SearchTool:
                 reviewed_docs = []
                 for doc in documents:
                     evaluation = await self._evaluate_document_relevance(doc, original_query, domain)
-                    if evaluation.get("relevance_score", 0) >= 5:  # Threshold for helpfulness
+                    if evaluation.get("relevance_score", 0) >= self.config.relevance_threshold:  # config: search.relevance_threshold
                         reviewed_docs.append(doc)
                 documents = reviewed_docs
                 logger.info(f"After review: {len(documents)}/{len(reranked_docs)} documents deemed helpful")

@@ -1,0 +1,59 @@
+# Orchestrate (agent coordination) configuration
+context_sharing: cross_talk   # [independent, previous_answers, cross_talk]
+log_intermediate_steps: true
+
+orchestrator:
+  model: ${model.name}
+  temperature: ${model.temperature}
+  max_turns: 1
+
+medical_specialties:
+  - Internal Medicine
+  - Cardiology
+  - Neurology
+  - Emergency Medicine
+  - Infectious Disease
+  - Pediatrics
+  - Endocrinology
+  - Pharmacology
+  - Pulmonology
+  - Gastroenterology
+  - Hematology
+  - Radiology
+  - Nephrology
+  - Psychiatry
+  - Oncology
+  - Genetics
+  - Dermatology
+  - Pathology
+  - Geriatrics
+  - Immunology
+  - Rheumatology
+  - Urology
+  - Obstetrics and Gynecology
+  - Surgery
+  - Preventive Medicine
+  - Critical Care Medicine
+  - Toxicology
+  - Anesthesiology
+  - Neurosurgery
+  - Family Medicine
+  - Vascular Medicine
+  - Ophthalmology
+  - Orthopedics
+  - Occupational Medicine
+  - Sports Medicine
+  - Public Health
+  - Clinical Research
+  - Sleep Medicine
+  - Allergy and Immunology
+  - Biostatistics
+  - Medical Ethics
+  - Neonatology
+  - Nutrition
+  - Epidemiology
+  - Rehabilitation Medicine
+  - Sexual Health
+  - Reproductive Medicine
+  - Transplant Medicine
+  - Clinical Pathology 

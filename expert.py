@@ -81,13 +81,25 @@ def update_expert_agent_config(**kwargs):
 def create_expert_agent(
     cfg: DictConfig,
     search_tool: SearchTool,
-    tool_choice: Optional[str] = None
+    tool_choice: Optional[str] = None,
+    difficulty_level: Optional[str] = None
 ) -> Agent[ExpertContext]:
     """
     Create an expert agent with the specified configuration.
     """
-    search_tools = get_search_tools(search_tool=search_tool)
-    tool_choice = tool_choice or cfg.retrieval.get('tool_choice', 'required') if hasattr(cfg, 'retrieval') else 'required'
+    # Determine tool_choice and tool availability based on search_mode
+    search_mode = None
+    if difficulty_level and hasattr(cfg, 'triage') and difficulty_level in cfg.triage:
+        search_mode = cfg.triage[difficulty_level].get('search_mode', 'auto')
+    if search_mode == 'required':
+        tool_choice = 'required'
+        search_tools = get_search_tools(search_tool=search_tool)
+    elif search_mode == 'auto':
+        tool_choice = 'auto'
+        search_tools = get_search_tools(search_tool=search_tool)
+    else:  # none
+        tool_choice = None
+        search_tools = []
     def get_expert_instructions(context_wrapper: RunContextWrapper[ExpertContext], _: Agent[ExpertContext]) -> str:
         expert_profile = context_wrapper.context.expert_profile
         name = expert_profile.get('name', 'Medical Expert')
@@ -116,7 +128,7 @@ def create_expert_agent(
             f"- get_previous_queries: Review previous search queries and their results to avoid duplicates\n\n"
             f"Use the search tools to find the most current and relevant medical information to support your analysis."
         )
-        if cfg.retrieval.get('search_history', "none") != "none":
+        if cfg.search.get('search_history', "none") != "none":
             instructions += f"\n\nPrevious Search Queries and Results:\n"
             instructions += f"{search_tool.get_previous_queries()}\n\n"
         return instructions
@@ -128,20 +140,25 @@ def create_expert_agent(
         output_type=ExpertResponse,
         model_settings=ModelSettings(
             temperature=cfg.model.temperature,
-            tool_choice=tool_choice if tool_choice != "none" else None
+            tool_choice=tool_choice
         )
     )
     return agent
 
 def _make_search_tool_config(cfg):
     search_config = SearchConfig()
-    if hasattr(cfg, 'retrieval') and hasattr(cfg.retrieval, 'search_tools'):
-        search_cfg = cfg.retrieval.search_tools
-        search_config.rewrite = search_cfg.get('auto_rewrite', False)
-        search_config.review = search_cfg.get('auto_review', False)
-        search_config.allowed_sources = search_cfg.get('allowed_sources', ['cpg', 'statpearls', 'recop', 'textbooks'])
-        search_config.similarity_strategy = search_cfg.get('similarity_strategy', 'reuse')
-        search_config.query_similarity_threshold = search_cfg.get('query_similarity_threshold', 0.85)
+    if hasattr(cfg, 'search'):
+        search_config.rewrite = getattr(cfg.search, 'rewrite', False)  # config: search.rewrite
+        search_config.review = getattr(cfg.search, 'review', False)    # config: search.review
+        search_config.allowed_sources = getattr(cfg.search, 'allowed_sources', ['cpg', 'statpearls', 'recop', 'textbooks'])
+        search_config.similarity_strategy = getattr(cfg.search, 'similarity_strategy', 'reuse')
+        search_config.query_similarity_threshold = getattr(cfg.search, 'query_similarity_threshold', 0.85)
+        search_config.retrieve_topk = getattr(cfg.search, 'retrieve_topk', 100)
+        search_config.rerank_topk = getattr(cfg.search, 'rerank_topk', 25)
+        search_config.cache_size = getattr(cfg.search, 'cache_size', 100)
+        search_config.max_concurrent_searches = getattr(cfg.search, 'max_concurrent_searches', 3)
+        search_config.relevance_threshold = getattr(cfg.search, 'relevance_threshold', 5)
+        search_config.search_history = getattr(cfg.search, 'search_history', 'individual')
     return search_config
 
 async def run_expert_agent(
@@ -149,7 +166,8 @@ async def run_expert_agent(
     expert_profile: Dict[str, Any],
     cfg: Optional[DictConfig] = None,
     session_id: str = None,
-    search_tool: Optional[SearchTool] = None
+    search_tool: Optional[SearchTool] = None,
+    difficulty_level: Optional[str] = None
 ) -> ExpertRunResult:
     """
     Run the expert agent to answer a medical question.
@@ -158,7 +176,7 @@ async def run_expert_agent(
     if cfg is None:
         cfg = OmegaConf.create({
             'model': {'name': 'gpt-4o-mini', 'temperature': 0.1},
-            'retrieval': {
+            'search': {
                 'tool_choice': 'required',
                 'search_history': "individual",
                 'search_tools': {
@@ -182,7 +200,7 @@ async def run_expert_agent(
         question=question,
         session_id=session_id
     )
-    expert_agent = create_expert_agent(cfg, search_tool)
+    expert_agent = create_expert_agent(cfg, search_tool, difficulty_level=difficulty_level)
     input_text = (
         f"Please answer the following medical question using your expertise and the search tools:\n\n"
         f"Question: {question}\n\n"
@@ -196,7 +214,7 @@ async def run_expert_agent(
         starting_agent=expert_agent,
         input=input_text,
         context=context,
-        max_turns=3
+        max_turns=5
     )
     if isinstance(result.final_output, ExpertResponse):
         expert_response = result.final_output
@@ -208,9 +226,12 @@ async def run_expert_agent(
             confidence="low",
             justification="Error in response processing"
         )
+    total_usage = Usage()
+    for raw_response in result.raw_responses:
+        total_usage.add(raw_response.usage)
     return ExpertRunResult(
         response=expert_response,
-        usage=result.raw_responses[0].usage,
+        usage=total_usage,
         search_tool=search_tool
     )
 
@@ -220,141 +241,3 @@ def format_question(question: str, options: Dict[str, str]) -> str:
     for key, value in options.items():
         text += f"({key}) {value}\n"
     return text
-
-@hydra.main(version_base=None, config_path='conf', config_name='config')
-def main(cfg: DictConfig):
-    """Test the expert agent with a sample question and expert profile."""
-    import os
-    from dotenv import load_dotenv
-    load_dotenv()
-    client = AsyncOpenAI(
-        base_url=os.getenv("OPENAI_ENDPOINT"),
-        api_key=os.getenv("OPENAI_API_KEY"),
-    )
-    set_default_openai_client(client=client, use_for_tracing=False)
-    set_tracing_disabled(disabled=True)
-    expert_profile = {
-        "name": "Dr. Sarah Chen",
-        "job_title": "Senior Cardiologist and Clinical Researcher",
-        "past_experience": "MD from Johns Hopkins University with 15 years of clinical practice in cardiology, specializing in interventional cardiology and heart failure management.",
-        "educational_background": "MD from Johns Hopkins University School of Medicine, Fellowship in Interventional Cardiology at Mayo Clinic, Board Certified in Cardiovascular Disease",
-        "core_specialties": "Interventional cardiology, heart failure, coronary artery disease, cardiac imaging, preventive cardiology",
-        "research_focus": "Novel therapeutic approaches for heart failure with preserved ejection fraction"
-    }
-    question = (
-        "A 65-year-old man presents with chest pain that radiates to his left arm. "
-        "He has a history of hypertension and diabetes. His ECG shows ST-segment elevation. "
-        "What is the most likely diagnosis and what are the immediate management steps?"
-    )
-    options = {
-        'A': 'Myocardial infarction',
-        'B': 'Angina pectoris',
-        'C': 'Pericarditis',
-        'D': 'Myocardial ischemia',
-        'E': 'None of the above',
-    }
-    formatted_question = format_question(question, options)
-    print(f"Expert: {expert_profile['name']}")
-    print(f"Specialty: {expert_profile['job_title']}")
-    print(f"Question: {question}")
-    print("\n" + "="*80)
-    print("FIRST RUN - WITHOUT PREVIOUS DISCUSSIONS")
-    print("="*80)
-    result1 = asyncio.run(run_expert_agent(
-        formatted_question, 
-        expert_profile, 
-        cfg, 
-        session_id="test_session_001"
-    ))
-    print(f"\nExpert Response (Run 1):")
-    print(f"Answer: {result1.response.answer}")
-    print(f"Confidence: {result1.response.confidence}")
-    print(f"Thought Process: {result1.response.thought}")
-    print(f"Justification: {result1.response.justification}")
-    print(f"\nSearch History:")
-    print(result1.search_tool.get_previous_queries())
-    print("\n" + "="*80)
-    print("SECOND RUN - WITH SAME SEARCH TOOL INSTANCE")
-    print("="*80)
-    follow_up_question = (
-        "Given the initial management, what are the key monitoring parameters "
-        "and potential complications to watch for in the first 24 hours?"
-    )
-    options2 = {
-        'A': 'Myocardial infarction',
-        'B': 'Angina pectoris',
-        'C': 'Pericarditis',
-        'D': 'Myocardial ischemia',
-        'E': 'None of the above',
-    }
-    formatted_follow_up_question = format_question(follow_up_question, options2)
-    print(f"Follow-up Question: {follow_up_question}")
-    context2 = ExpertContext(
-        expert_profile=expert_profile,
-        question=formatted_follow_up_question,
-        session_id="test_session_001"
-    )
-    # Reuse the search tool for the second run
-    result2 = asyncio.run(run_expert_agent(
-        formatted_follow_up_question,
-        expert_profile,
-        cfg,
-        session_id="test_session_001",
-        search_tool=result1.search_tool
-    ))
-    print(f"\nExpert Response (Run 2):")
-    print(f"Answer: {result2.response.answer}")
-    print(f"Confidence: {result2.response.confidence}")
-    print(f"Thought Process: {result2.response.thought}")
-    print(f"Justification: {result2.response.justification}")
-    print(f"\nUpdated Search History:")
-    print(result2.search_tool.get_previous_queries())
-
-if __name__ == "__main__":
-    import os
-    from omegaconf import OmegaConf
-
-    # Try to load config from conf/config.yaml if available, else use a minimal config
-    config_path = os.path.join(os.path.dirname(__file__), 'conf', 'config.yaml')
-    if os.path.exists(config_path):
-        cfg = OmegaConf.load(config_path)
-    else:
-        # Minimal fallback config
-        cfg = OmegaConf.create({
-            'model': {'name': 'gpt-4o-mini', 'temperature': 0.1},
-            'retrieval': {'tool_choice': 'required', 'search_tools': {}},
-        })
-
-    expert_profile = {
-        "name": "Dr. Sarah Chen",
-        "job_title": "Senior Cardiologist and Clinical Researcher",
-        "past_experience": "MD from Johns Hopkins University with 15 years of clinical practice in cardiology, specializing in interventional cardiology and heart failure management.",
-        "educational_background": "MD from Johns Hopkins University School of Medicine, Fellowship in Interventional Cardiology at Mayo Clinic, Board Certified in Cardiovascular Disease",
-        "core_specialties": "Interventional cardiology, heart failure, coronary artery disease, cardiac imaging, preventive cardiology",
-        "research_focus": "Novel therapeutic approaches for heart failure with preserved ejection fraction"
-    }
-    question = (
-        "A 65-year-old man presents with chest pain that radiates to his left arm. "
-        "He has a history of hypertension and diabetes. His ECG shows ST-segment elevation. "
-        "What is the most likely diagnosis and what are the immediate management steps?"
-    )
-    options = {
-        'A': 'Myocardial infarction',
-        'B': 'Angina pectoris',
-        'C': 'Pericarditis',
-        'D': 'Myocardial ischemia',
-        'E': 'None of the above',
-    }
-    formatted_question = format_question(question, options)
-    result = asyncio.run(run_expert_agent(
-        formatted_question,
-        expert_profile,
-        cfg,
-        session_id="test_session_001"
-    ))
-    print("\n=== EXPERT AGENT OUTPUT ===")
-    print(f"Answer: {result.response.answer}")
-    print(f"Confidence: {result.response.confidence}")
-    print(f"Thought Process: {result.response.thought}")
-    print(f"Justification: {result.response.justification}")
-    print(f"\nSearch History:\n{result.search_tool.get_previous_queries()}") 

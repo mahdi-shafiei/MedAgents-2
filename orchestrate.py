@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 from expert import ExpertResult
 from agents import Agent, Runner, ModelSettings, RunContextWrapper, Usage
 
-# Set up logging
 logger = logging.getLogger(__name__)
 
 class OrchestratorFeedback(BaseModel):
@@ -75,10 +74,10 @@ Be constructive, specific, and focus on improving the quality of medical reasoni
 
     return Agent[OrchestratorContext](
         name="OrchestratorAgent",
-        model=cfg.get('orchestrator_model', 'gpt-4o-mini'),
+        model=cfg.orchestrate.get('orchestrator_model', cfg.model.name),  # config: orchestrate.orchestrator_model or model.name
         instructions=get_orchestrator_instructions,
         output_type=OrchestratorResponse,
-        model_settings=ModelSettings(temperature=0.1)
+        model_settings=ModelSettings(temperature=cfg.orchestrate.get('orchestrator_temperature', cfg.model.temperature))  # config: orchestrate.orchestrator_temperature or model.temperature
     )
 
 async def run_orchestrator_agent(expert_results: List[ExpertResult], question: str, options: Dict[str, str], round_num: int, current_decision: Dict[str, Any], cfg: DictConfig) -> OrchestratorRunResult:
@@ -133,13 +132,17 @@ Focus on the quality of medical reasoning, evidence cited, and whether additiona
         starting_agent=orchestrator_agent,
         input=analysis_prompt,
         context=context,
-        max_turns=1
+        max_turns=cfg.orchestrate.get('orchestrator_max_turns', 1)
     )
     
     if isinstance(result.final_output, OrchestratorResponse):
+        total_usage = Usage()
+        for raw_response in result.raw_responses:
+            total_usage.add(raw_response.usage)
+        
         return OrchestratorRunResult(
             response=result.final_output,
-            usage=result.raw_responses[0].usage
+            usage=total_usage
         )
     else:
         logger.warning("Orchestrator agent didn't return expected OrchestratorResponse format")

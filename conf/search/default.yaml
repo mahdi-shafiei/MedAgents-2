@@ -1,0 +1,22 @@
+# Search (retrieval) hyperparameters
+milvus:
+  uri: ${oc.env:MILVUS_URI,"http://localhost:19530"}
+hardware:
+  device: ${oc.env:DEVICE,"cuda"}
+allowed_sources: [cpg, statpearls, recop, textbooks]
+topk:
+  retrieve: 100
+  rerank: 25
+similarity:
+  threshold: 0.85
+  strategy: reuse   # [reuse, generate, none]
+rewrite: false
+review: false
+cache:
+  size: 100
+concurrency:
+  max_searches: 3
+relevance:
+  threshold: 5
+search_history: individual   # [none, individual, shared]
+search_mode: both # [both, web, vector]
