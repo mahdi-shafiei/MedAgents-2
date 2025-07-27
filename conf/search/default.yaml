@@ -1,4 +1,6 @@
 # Search (retrieval) hyperparameters
+experiment_name: baseline  # Name for this ablation experiment
+
 milvus:
   uri: ${oc.env:MILVUS_URI,"http://localhost:19530"}
 hardware:
@@ -6,11 +8,11 @@ hardware:
 allowed_sources: [cpg, statpearls, recop, textbooks]
 topk:
   retrieve: 100
-  rerank: 25
+  rerank: 20
 similarity:
   threshold: 0.85
   strategy: reuse   # [reuse, generate, none]
-rewrite: false
+rewrite: true
 review: false
 cache:
   size: 100
@@ -18,5 +20,5 @@ concurrency:
   max_searches: 3
 relevance:
   threshold: 5
-search_history: individual   # [none, individual, shared]
+search_history: none   # [none, individual, shared]
 search_mode: both # [both, web, vector]

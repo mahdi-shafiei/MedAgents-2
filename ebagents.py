@@ -58,7 +58,8 @@ class MedAgentsLog:
                     "thought": er.result.response.thought,
                     "answer": er.result.response.answer,
                     "confidence": er.result.response.confidence,
-                    "justification": er.result.response.justification
+                    "justification": er.result.response.justification,
+                    "evidences": er.result.response.evidences
                 },
                 "search_tool": {
                     "previous_queries": er.result.search_tool.get_previous_queries(max_length=200, max_queries=3)
@@ -167,17 +168,25 @@ class EBMedAgents:
             usage_by_type[agent_type].add(agent_usage.usage)
         return usage_by_type
 
-    def _prepare_context(self, n_experts, mode):
+    def _prepare_context(self, n_experts, discussion_mode):
         search_config = _make_search_tool_config(self.cfg)
-        if mode == 'previous_answers':
-            session_ids = [str(uuid.uuid4()) for _ in range(n_experts)]
-            search_tools = [create_search_tool_instance(search_config) for _ in range(n_experts)]
-            return session_ids, search_tools, None, None
-        elif mode == 'cross_talk':
+        if discussion_mode == 'group_chat_with_orchestrator':
+            # Shared context for group chat
             shared_session_id = str(uuid.uuid4())
             shared_search_tool = create_search_tool_instance(search_config)
             return None, None, shared_session_id, shared_search_tool
+        elif discussion_mode == 'group_chat_voting_only':
+            # Shared context for group chat without orchestrator
+            shared_session_id = str(uuid.uuid4())
+            shared_search_tool = create_search_tool_instance(search_config)
+            return None, None, shared_session_id, shared_search_tool
+        elif discussion_mode == 'one_on_one_sync':
+            # Individual contexts for 1-on-1 sync
+            session_ids = [str(uuid.uuid4()) for _ in range(n_experts)]
+            search_tools = [create_search_tool_instance(search_config) for _ in range(n_experts)]
+            return session_ids, search_tools, None, None
         else:
+            # Default to independent mode
             return None, None, None, None
 
     def _build_expert_profile(self, profile, job_title, research_focus):
@@ -186,22 +195,36 @@ class EBMedAgents:
         expert_profile.update({'job_title': job_title, 'research_focus': research_focus})
         return expert_profile
 
-    def _build_debate_question(self, formatted_question, mode, round_num, expert_index, prev_answers, triage, orchestrator_feedback, expert_profile):
-        """Build the debate question for an expert based on mode and context."""
+    def _build_debate_question(self, formatted_question, discussion_mode, round_num, expert_index, prev_answers, triage, orchestrator_feedback, expert_profile):
+        """Build the debate question for an expert based on discussion mode and context."""
         debate_question = formatted_question
 
-        if mode == 'previous_answers' and round_num > 0 and prev_answers[expert_index] is not None:
-            debate_question += f"\n\nYour previous answer (round {round_num}): {prev_answers[expert_index].answer}"
-        elif mode == 'cross_talk' and round_num > 0:
+        if discussion_mode == 'group_chat_with_orchestrator' and round_num > 0:
+            # Group chat: experts can see other experts' responses
             other_answers = [
                 f"{p.name}: {a.answer}" 
                 for j, (p, a) in enumerate(zip(triage.expert_profiles, prev_answers)) 
                 if a is not None and j != expert_index
             ]
             if other_answers:
-                debate_question += "\n\nOther experts' previous answers: " + ", ".join(other_answers)
+                debate_question += "\n\nOther experts' previous answers:\n" + "\n".join(other_answers)
 
-        if round_num > 0 and orchestrator_feedback:
+        elif discussion_mode == 'group_chat_voting_only' and round_num > 0:
+            # Group chat without orchestrator: experts can see other experts' responses but no orchestrator feedback
+            other_answers = [
+                f"{p.name}: {a.answer}" 
+                for j, (p, a) in enumerate(zip(triage.expert_profiles, prev_answers)) 
+                if a is not None and j != expert_index
+            ]
+            if other_answers:
+                debate_question += "\n\nOther experts' previous answers:\n" + "\n".join(other_answers)
+
+        elif discussion_mode == 'one_on_one_sync' and round_num > 0:
+            # 1-on-1 sync: experts only get orchestrator feedback, not other experts' responses
+            pass  # No other experts' responses shown
+
+        # Add orchestrator feedback for modes that use it
+        if round_num > 0 and orchestrator_feedback and discussion_mode in ['group_chat_with_orchestrator', 'one_on_one_sync']:
             expert_name = expert_profile.get('name', 'Unknown')
             expert_feedback = next((fb for fb in orchestrator_feedback.expert_feedback if fb.expert_name == expert_name), None)
             if expert_feedback:
@@ -234,7 +257,7 @@ class EBMedAgents:
             round_num=round_num,
             expert_name=expert_name
         )
-        logger.info(f"Expert {expert_index + 1} responded: Answer={result.response.answer}, Confidence={result.response.confidence}")
+        logger.info(f"Expert {expert_index + 1} responded: Answer={result.response.answer}, Confidence={result.response.confidence}, Evidences={result.response.evidences}")
         return result
 
     def _calculate_final_decision(self, expert_results: List[ExpertRunResult], options: Dict[str, str]) -> Dict[str, Any]:
@@ -261,6 +284,7 @@ class EBMedAgents:
                     'name': er.profile.get('name', 'Expert'),
                     'answer': er.result.response.answer,
                     'confidence': er.result.response.confidence,
+                    'evidences': er.result.response.evidences,
                     'weight': er.weight
                 } for er in expert_results
             ]
@@ -278,27 +302,27 @@ class EBMedAgents:
         triage: TriageOutput = triage_result.response
         n_experts = len(triage.expert_profiles)
         logger.info(f"Triage selected {n_experts} experts")
-        mode = getattr(self.cfg.orchestrate, 'context_sharing', 'independent')
+        discussion_mode = getattr(self.cfg.orchestrate, 'discussion_mode', 'group_chat_with_orchestrator')
         if difficulty is None:
             difficulty = getattr(triage_result.response, 'difficulty', None) or 'medium'
         max_rounds = self.cfg.triage[difficulty]['max_rounds'] if difficulty in self.cfg.triage else 2
-        logger.info(f"Running up to {max_rounds} rounds in {mode} mode")
+        logger.info(f"Running up to {max_rounds} rounds in {discussion_mode} mode")
         prev_answers = [None] * n_experts
         orchestrator_feedback = None
-        session_ids, search_tools, shared_session_id, shared_search_tool = self._prepare_context(n_experts, mode)
+        session_ids, search_tools, shared_session_id, shared_search_tool = self._prepare_context(n_experts, discussion_mode)
         for r in range(max_rounds):
             logger.info(f"Starting round {r+1}/{max_rounds}")
             expert_tasks = []
             for i, profile in enumerate(triage.expert_profiles):
                 expert_profile = self._build_expert_profile(profile, triage.job_titles[i], triage.research_focuses[i])
-                if mode == 'previous_answers':
+                if discussion_mode == 'one_on_one_sync':
                     session_id, search_tool = session_ids[i], search_tools[i]
-                elif mode == 'cross_talk':
+                elif discussion_mode in ['group_chat_with_orchestrator', 'group_chat_voting_only']:
                     session_id, search_tool = shared_session_id, shared_search_tool
                 else:  # independent
                     session_id, search_tool = None, None
                 debate_question = self._build_debate_question(
-                    formatted_question, mode, r, i, prev_answers, triage, orchestrator_feedback, expert_profile
+                    formatted_question, discussion_mode, r, i, prev_answers, triage, orchestrator_feedback, expert_profile
                 )
                 # Pass difficulty to _run_single_expert so search_mode is respected
                 expert_tasks.append(
@@ -318,22 +342,35 @@ class EBMedAgents:
             logger.info(f"Round {r+1} completed with {len(round_results)} expert responses")
             current_decision = self._calculate_final_decision(round_results, options)
             logger.info(f"Current decision after round {r+1}: {current_decision['final_answer']}")
-            logger.info(f"Orchestrator analyzing round {r+1}")
-            orchestrator_result = await run_orchestrator_agent(round_results, question, options, r, current_decision, self.cfg)
-            self._add_usage_stat(
-                agent_name="OrchestratorAgent",
-                agent_type="orchestrator",
-                usage=orchestrator_result.usage,
-                round_num=r
-            )
-            orchestrator_feedback = orchestrator_result.response
-            logger.info(f"Orchestrator provided feedback for {len(orchestrator_feedback.expert_feedback)} experts")
-            logger.info(f"Orchestrator decision: should_continue={orchestrator_feedback.should_continue}, confidence={orchestrator_feedback.confidence_in_decision}")
+            
+            # Only run orchestrator for modes that use it
+            if discussion_mode in ['group_chat_with_orchestrator', 'one_on_one_sync']:
+                logger.info(f"Orchestrator analyzing round {r+1}")
+                orchestrator_result = await run_orchestrator_agent(round_results, question, options, r, current_decision, self.cfg)
+                self._add_usage_stat(
+                    agent_name="OrchestratorAgent",
+                    agent_type="orchestrator",
+                    usage=orchestrator_result.usage,
+                    round_num=r
+                )
+                orchestrator_feedback = orchestrator_result.response
+                logger.info(f"Orchestrator provided feedback for {len(orchestrator_feedback.expert_feedback)} experts")
+                logger.info(f"Orchestrator decision: should_continue={orchestrator_feedback.should_continue}, confidence={orchestrator_feedback.confidence_in_decision}")
+                
+                # Check if orchestrator wants to continue
+                should_continue = orchestrator_feedback.should_continue
+            else:
+                # For voting-only mode, no orchestrator feedback
+                orchestrator_feedback = None
+                # Continue for max_rounds or until consensus (simple implementation)
+                should_continue = r < max_rounds - 1  # Continue until last round
+            
             debate_round = DebateRound(round_num=r, expert_results=round_results, current_decision=current_decision, orchestrator_feedback=orchestrator_feedback)
             self.log.rounds.append(debate_round)
             prev_answers = [er.result.response for er in round_results]
-            if not orchestrator_feedback.should_continue:
-                logger.info(f"Orchestrator decided to end discussion after round {r+1}")
+            
+            if not should_continue:
+                logger.info(f"Discussion ending after round {r+1}")
                 break
         self.log.final_decision = self.log.rounds[-1].current_decision
         self._calculate_total_usage()

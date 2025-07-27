@@ -40,8 +40,8 @@ class SearchConfig:
     rerank_topk: int = 25
     query_similarity_threshold: float = 0.85
     similarity_strategy: str = "reuse"  # "reuse", "generate", "none"
-    rewrite: bool = False  # Only use rewrite, not auto_rewrite
-    review: bool = False  # Only use review, not auto_review
+    rewrite: bool = True  # Only use rewrite
+    review: bool = True  # Only use review
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     cache_size: int = 100
     max_concurrent_searches: int = 3
@@ -233,7 +233,7 @@ class SearchTool:
         result = "Previous Search Queries and Results:\n"
         result += "=" * 50 + "\n\n"
         
-        for i, cached_item in enumerate(random.sample(self._query_cache, max_queries) if max_queries else self._query_cache, 1):
+        for i, cached_item in enumerate(random.sample(self._query_cache, min(max_queries, len(self._query_cache))) if max_queries else self._query_cache, 1):
             result += f"Query {i}: {cached_item['query']}\n"
             result += "-" * 30 + "\n"
             
@@ -255,12 +255,6 @@ class SearchTool:
         self,
         query: str,
         domain: Optional[str] = None,
-        rewrite: Optional[bool] = None,
-        review: Optional[bool] = None,
-        retrieve_topk: Optional[int] = None,
-        rerank_topk: Optional[int] = None,
-        similarity_strategy: Optional[str] = None,
-        query_similarity_threshold: Optional[float] = None
     ) -> List[str]:
         """
         Search for relevant medical knowledge with configurable behavior.
@@ -274,32 +268,19 @@ class SearchTool:
         Args:
             query: The search query
             domain: Optional medical domain to focus the search
-            rewrite: Whether to rewrite the query for better retrieval (default: config setting)
-            review: Whether to review documents for relevance (default: config setting)
-            retrieve_topk: Number of documents to retrieve initially (default: config setting)
-            rerank_topk: Number of documents after reranking (default: config setting)
-            similarity_strategy: How to handle similar queries - "reuse", "generate", "none" (default: config setting)
-            query_similarity_threshold: Threshold for query similarity (default: config setting)
         
         Returns:
             List of relevant document texts
         """
-        rewrite = rewrite if rewrite is not None else self.config.rewrite  # config: search.rewrite
-        review = review if review is not None else self.config.review      # config: search.review
-        retrieve_topk = retrieve_topk or self.config.retrieve_topk
-        rerank_topk = rerank_topk or self.config.rerank_topk
-        similarity_strategy = similarity_strategy or self.config.similarity_strategy
-        query_similarity_threshold = query_similarity_threshold or self.config.query_similarity_threshold
+        
         
         original_config = {
             'similarity_strategy': self.config.similarity_strategy,
             'query_similarity_threshold': self.config.query_similarity_threshold
         }
-        self.config.similarity_strategy = similarity_strategy
-        self.config.query_similarity_threshold = query_similarity_threshold
         
         try:
-            if similarity_strategy != "none":
+            if self.config.similarity_strategy != "none":
                 similarity_info = self._check_query_similarity(query)
                 
                 if similarity_info["is_similar"] and similarity_info["recommendation"] == "reuse_previous_results":
@@ -318,7 +299,7 @@ class SearchTool:
             if domain:
                 query += f" Specifically considering aspects related to {domain}."
             
-            if rewrite:
+            if self.config.rewrite:
                 query = await self._rewrite_query(query, domain)
                 logger.info(f"Rewritten query: {query}")
             
@@ -331,7 +312,7 @@ class SearchTool:
                         query, 
                         self._get_milvus_client(), 
                         allowed_sources=[source], 
-                        topk=retrieve_topk
+                        topk=self.config.retrieve_topk
                     )
                     all_docs.extend(docs)
                 except Exception as e:
@@ -339,13 +320,13 @@ class SearchTool:
             
             unique_docs = list(dict.fromkeys(all_docs))
             reranked_docs = retriever.rerank(query, unique_docs)
-            documents = reranked_docs[:rerank_topk]
+            documents = reranked_docs[:self.config.rerank_topk]
             
-            if review:
+            if self.config.review:
                 reviewed_docs = []
                 for doc in documents:
                     evaluation = await self._evaluate_document_relevance(doc, original_query, domain)
-                    if evaluation.get("relevance_score", 0) >= self.config.relevance_threshold:  # config: search.relevance_threshold
+                    if evaluation.get("relevance_score", 0) >= self.config.relevance_threshold:
                         reviewed_docs.append(doc)
                 documents = reviewed_docs
                 logger.info(f"After review: {len(documents)}/{len(reranked_docs)} documents deemed helpful")
@@ -367,12 +348,6 @@ class SearchTool:
         async def search_medical_knowledge(
             query: str,
             domain: Optional[str] = None,
-            rewrite: Optional[bool] = None,
-            review: Optional[bool] = None,
-            retrieve_topk: Optional[int] = None,
-            rerank_topk: Optional[int] = None,
-            similarity_strategy: Optional[str] = None,
-            query_similarity_threshold: Optional[float] = None
         ) -> List[str]:
             """
             Search for relevant medical knowledge with configurable behavior.
@@ -386,12 +361,6 @@ class SearchTool:
             Args:
                 query: The search query
                 domain: Optional medical domain to focus the search
-                rewrite: Whether to rewrite the query for better retrieval (default: config setting)
-                review: Whether to review documents for relevance (default: config setting)
-                retrieve_topk: Number of documents to retrieve initially (default: config setting)
-                rerank_topk: Number of documents after reranking (default: config setting)
-                similarity_strategy: How to handle similar queries - "reuse", "generate", "none" (default: config setting)
-                query_similarity_threshold: Threshold for query similarity (default: config setting)
             
             Returns:
                 List of relevant document texts
@@ -399,12 +368,6 @@ class SearchTool:
             return await self.search_medical_knowledge(
                 query=query,
                 domain=domain,
-                rewrite=rewrite,
-                review=review,
-                retrieve_topk=retrieve_topk,
-                rerank_topk=rerank_topk,
-                similarity_strategy=similarity_strategy,
-                query_similarity_threshold=query_similarity_threshold
             )
         
         return search_medical_knowledge

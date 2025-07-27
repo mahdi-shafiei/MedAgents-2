@@ -74,10 +74,10 @@ Be constructive, specific, and focus on improving the quality of medical reasoni
 
     return Agent[OrchestratorContext](
         name="OrchestratorAgent",
-        model=cfg.orchestrate.get('orchestrator_model', cfg.model.name),  # config: orchestrate.orchestrator_model or model.name
+        model=cfg.orchestrate.get('orchestrator_model', cfg.execution.model.name),  # config: orchestrate.orchestrator_model or model.name
         instructions=get_orchestrator_instructions,
         output_type=OrchestratorResponse,
-        model_settings=ModelSettings(temperature=cfg.orchestrate.get('orchestrator_temperature', cfg.model.temperature))  # config: orchestrate.orchestrator_temperature or model.temperature
+        model_settings=ModelSettings(temperature=cfg.orchestrate.get('orchestrator_temperature', cfg.execution.model.temperature))  # config: orchestrate.orchestrator_temperature or model.temperature
     )
 
 async def run_orchestrator_agent(expert_results: List[ExpertResult], question: str, options: Dict[str, str], round_num: int, current_decision: Dict[str, Any], cfg: DictConfig) -> OrchestratorRunResult:
@@ -128,13 +128,18 @@ Focus on the quality of medical reasoning, evidence cited, and whether additiona
     )
 
     orchestrator_agent = _create_orchestrator_agent(cfg)
-    result = await Runner.run(
-        starting_agent=orchestrator_agent,
-        input=analysis_prompt,
-        context=context,
-        max_turns=cfg.orchestrate.get('orchestrator_max_turns', 1)
-    )
-    
+    while True:
+        try:
+            result = await Runner.run(
+                starting_agent=orchestrator_agent,
+                input=analysis_prompt,
+                context=context,
+                max_turns=cfg.orchestrate.get('orchestrator_max_turns', 1)
+            )
+            break
+        except Exception:
+            await asyncio.sleep(1)
+
     if isinstance(result.final_output, OrchestratorResponse):
         total_usage = Usage()
         for raw_response in result.raw_responses:

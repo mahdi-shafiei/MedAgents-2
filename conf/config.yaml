@@ -1,6 +1,5 @@
 # Compose all config groups
 defaults:
-  - model: default
   - search: default
   - orchestrate: default
   - triage: default

@@ -130,13 +130,13 @@ async def run_triage_agent(question: str, cfg: DictConfig):
         
         return Agent(
             name=f"TriageAgent_{difficulty_level.capitalize()}",
-            model=cfg.model.name,                  # config: model.name
+            model=cfg.execution.model.name,                  # config: model.name
             instructions=(
                 f"{_default_cfg.triage_system_prompt}\n"
                 f"{_default_cfg.triage_template.format(question=question, fields=fields, n=n)}"
             ),
             model_settings=ModelSettings(
-                temperature=cfg.model.temperature, # config: model.temperature
+                temperature=cfg.execution.model.temperature, # config: model.temperature
             ),
             output_type=TriageOutput,
         )
@@ -152,13 +152,13 @@ async def run_triage_agent(question: str, cfg: DictConfig):
     # ——————————————————————————————————————————————
     triage_agent = Agent(
         name="TriageAgent",
-        model=cfg.model.name,
+        model=cfg.execution.model.name,
         instructions=(
             f"{_default_cfg.difficulty_system_prompt}\n"
             f"{_default_cfg.difficulty_template.format(question=question)}"
         ),
         model_settings=ModelSettings(
-            temperature=cfg.model.temperature,
+            temperature=cfg.execution.model.temperature,
         ),
         handoffs=[
             handoff(
@@ -179,11 +179,17 @@ async def run_triage_agent(question: str, cfg: DictConfig):
         ]
     )
     
-    result = await Runner.run(
-        starting_agent=triage_agent,
-        input=question,
-        context={},
-    )
+    while True:
+        try:
+            result = await Runner.run(
+                starting_agent=triage_agent,
+                input=question,
+                context={},
+            )
+            break
+        except Exception:
+            await asyncio.sleep(1)
+
     total_usage = Usage()
     for raw_response in result.raw_responses:
         total_usage.add(raw_response.usage)

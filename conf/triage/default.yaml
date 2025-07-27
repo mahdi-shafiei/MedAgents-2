@@ -1,4 +1,5 @@
 # Triage (difficulty-based agent discussion settings)
+experiment_name: baseline  # Name for this ablation experiment
 
 disable_triage: false  # If true, triage agent is bypassed and forced_level is used
 forced_level: easy     # Options: easy, medium, hard, custom

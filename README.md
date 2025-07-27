@@ -90,7 +90,6 @@ Guides the debate, synthesizes expert opinions, and provides actionable feedback
 
 MedAgents-2 uses Hydra for flexible configuration. Main config files:
 - `conf/config.yaml`: Main entry point
-- `conf/model/default.yaml`: LLM settings
 - `conf/orchestrate/default.yaml`: Agent orchestration
 - `conf/triage/default.yaml`: Triage/difficulty
 - `conf/search/default.yaml`: Search/retrieval

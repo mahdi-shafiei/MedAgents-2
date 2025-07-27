@@ -1,5 +1,9 @@
 # Orchestrate (agent coordination) configuration
-context_sharing: cross_talk   # [independent, previous_answers, cross_talk]
+# Discussion modes:
+# - group_chat_with_orchestrator: Experts can see other experts' responses and get orchestrator feedback
+# - group_chat_voting_only: Experts can see other experts' responses but no orchestrator (voting only)
+# - one_on_one_sync: Experts only get orchestrator feedback, not other experts' responses (still multi-expert)
+discussion_mode: group_chat_with_orchestrator
 log_intermediate_steps: true
 
 orchestrator:
