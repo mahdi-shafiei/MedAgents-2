@@ -9,7 +9,7 @@ baselines/*/logs/
 # Ignore logs directory
 logs/**
 output/**
-
+outputs/**
 
 # Byte-compiled / optimized / DLL files
 __pycache__/        
