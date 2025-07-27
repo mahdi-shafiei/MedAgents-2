@@ -1,5 +1,0 @@
-- execution.dataset.name=medqa
-- execution.dataset.split=test_hard
-- execution.model.name=gpt-4o-mini
-- execution.experiments.run_id=0
-- execution.experiment_name=agent_configuration_triage_enabled
