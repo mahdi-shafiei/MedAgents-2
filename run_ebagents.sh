@@ -34,7 +34,6 @@ for RUN_ID in "${RUN_IDS[@]}"; do
             execution.model.name=$MODEL \
             execution.experiments.run_id=$RUN_ID \
             execution.experiment_name=ebagents/$EXPERIMENT_NAME \
-            search.search_mode=web \
 
         echo "Completed experiment for $DATASET (run $RUN_ID)"
         echo "Results saved in: output/$DATASET/$EXPERIMENT_NAME/run_$RUN_ID/$MODEL/"
