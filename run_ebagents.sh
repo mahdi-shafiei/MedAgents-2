@@ -10,8 +10,8 @@ echo "Running MedAgents-2 Basic Experiment"
 echo "=========================================="
 
 # Configuration - Available datasets: afrimedqa, medbullets, medexqa, medmcqa, medqa, medqa_5options, medxpertqa-r, medxpertqa-u, mmlu, mmlu-pro, pubmedqa
-DATASETS=("medqa")
-RUN_IDS=(0)
+DATASETS=("medqa" "medbullets" "medexqa" "medmcqa" "medxpertqa-r" "medxpertqa-u" "mmlu" "mmlu-pro" "pubmedqa")
+RUN_IDS=(0 1 2)
 SPLIT="test_hard"
 MODEL="gpt-4o-mini"
 EXPERIMENT_NAME="baseline"
@@ -33,7 +33,8 @@ for RUN_ID in "${RUN_IDS[@]}"; do
             execution.dataset.split=$SPLIT \
             execution.model.name=$MODEL \
             execution.experiments.run_id=$RUN_ID \
-            execution.experiment_name=$EXPERIMENT_NAME
+            execution.experiment_name=ebagents/$EXPERIMENT_NAME \
+            search.search_mode=web \
 
         echo "Completed experiment for $DATASET (run $RUN_ID)"
         echo "Results saved in: output/$DATASET/$EXPERIMENT_NAME/run_$RUN_ID/$MODEL/"

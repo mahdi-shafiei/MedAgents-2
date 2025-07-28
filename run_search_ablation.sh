@@ -22,7 +22,7 @@ for RUN_ID in "${RUN_IDS[@]}"; do
         execution.dataset.split=$SPLIT \
         execution.model.name=$MODEL \
         execution.experiments.run_id=$RUN_ID \
-        execution.experiment_name=${EXPERIMENT_NAME}_$ablation \
+        execution.experiment_name=${EXPERIMENT_NAME}/$ablation \
         ${configs[$ablation]}
         echo "Completed $ablation ablation."
         echo ""
@@ -45,7 +45,7 @@ for RUN_ID in "${RUN_IDS[@]}"; do
             execution.dataset.split=$SPLIT \
             execution.model.name=$MODEL \
             execution.experiments.run_id=$RUN_ID \
-            execution.experiment_name=${EXPERIMENT_NAME}_$ablation \
+            execution.experiment_name=${EXPERIMENT_NAME}/$ablation \
             ${configs[$ablation]}
         echo "Completed $ablation ablation."
         echo ""
@@ -67,7 +67,7 @@ for RUN_ID in "${RUN_IDS[@]}"; do
             execution.dataset.split=$SPLIT \
             execution.model.name=$MODEL \
             execution.experiments.run_id=$RUN_ID \
-            execution.experiment_name=${EXPERIMENT_NAME}_$ablation \
+            execution.experiment_name=${EXPERIMENT_NAME}/$ablation \
             ${configs[$ablation]}
             echo "Completed $ablation ablation."
             echo ""
@@ -91,7 +91,7 @@ for RUN_ID in "${RUN_IDS[@]}"; do
             execution.dataset.split=$SPLIT \
             execution.model.name=$MODEL \
             execution.experiments.run_id=$RUN_ID \
-            execution.experiment_name=${EXPERIMENT_NAME}_$ablation \
+            execution.experiment_name=${EXPERIMENT_NAME}/$ablation \
             ${configs[$ablation]}
             echo "Completed $ablation ablation."
             echo ""
