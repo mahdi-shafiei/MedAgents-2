@@ -223,7 +223,6 @@ class EBMedAgents:
             # 1-on-1 sync: experts only get orchestrator feedback, not other experts' responses
             pass  # No other experts' responses shown
 
-        # Add orchestrator feedback for modes that use it
         if round_num > 0 and orchestrator_feedback and discussion_mode in ['group_chat_with_orchestrator', 'one_on_one_sync']:
             expert_name = expert_profile.get('name', 'Unknown')
             expert_feedback = next((fb for fb in orchestrator_feedback.expert_feedback if fb.expert_name == expert_name), None)

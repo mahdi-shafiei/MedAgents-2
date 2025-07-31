@@ -286,6 +286,7 @@ async def run_expert_agent(
         f"Use 'low' confidence when you have doubts, 'medium' when reasonably sure, and 'high' only when very certain.\n\n"
         f"This is your only opportunity to respond - make it complete and definitive."
     )
+    result = None
     for _ in range(5):
         try:
             result = await Runner.run(
@@ -298,23 +299,24 @@ async def run_expert_agent(
         except Exception:
             pass
 
-    if isinstance(result.final_output, ExpertResponse):
+    if result is not None and isinstance(result.final_output, ExpertResponse):
         expert_response = result.final_output
     else:
         logger.warning("Expert agent didn't return expected ExpertResponse format")
         expert_response = ExpertResponse(
             thought="Unable to process response properly",
-            answer="Z",
+            answer="A",
             confidence="low",
             evidences=[],
             justification="Error in response processing"
         )
-    total_usage = Usage()
-    for raw_response in result.raw_responses:
-        total_usage.add(raw_response.usage)
+    if result is not None:
+        total_usage = Usage()
+        for raw_response in result.raw_responses:
+            total_usage.add(raw_response.usage)
     return ExpertRunResult(
         response=expert_response,
-        usage=total_usage,
+        usage=total_usage if result is not None else None,
         search_tool=search_tool
     )
 

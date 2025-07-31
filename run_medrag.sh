@@ -19,7 +19,8 @@ echo ""
 EXPERIMENT_NAME="medrag"
 
 declare -A configs
-configs["1_agent_1_round_with_search"]="triage.disable_triage=true triage.forced_level=easy triage.easy.num_experts=1 triage.easy.max_rounds=1 triage.easy.search_mode=required search.rewrite=false search.review=false search.search_mode=vector orchestrate.discussion_mode=group_chat_voting_only"
+configs["medrag"]="triage.disable_triage=true triage.forced_level=easy triage.easy.num_experts=1 triage.easy.max_rounds=1 triage.easy.search_mode=required search.rewrite=false search.review=false search.search_mode=vector orchestrate.discussion_mode=group_chat_voting_only"
+# configs["imedrag"]="triage.disable_triage=true triage.forced_level=easy triage.easy.num_experts=1 triage.easy.max_rounds=3 triage.easy.search_mode=required search.rewrite=false search.review=false search.search_mode=vector orchestrate.discussion_mode=group_chat_voting_only"
 
 for RUN_ID in "${RUN_IDS[@]}"; do
     for DATASET in "${DATASETS[@]}"; do

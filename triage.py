@@ -90,7 +90,6 @@ def get_medical_specialties(cfg: DictConfig) -> List[str]:
 # Triage agent runner function
 # ——————————————————————————————————————————————
 async def run_triage_agent(question: str, cfg: DictConfig):
-    # Check for ablation: disable triage and force level
     if getattr(cfg.triage, 'disable_triage', False):
         forced_level = getattr(cfg.triage, 'forced_level', 'easy')
         if forced_level == 'custom':
@@ -120,11 +119,11 @@ async def run_triage_agent(question: str, cfg: DictConfig):
             research_focuses=research_focuses
         )
         return TriageRunResult(response=output, usage=Usage())
-    # ——————————————————————————————————————————————
-    # Define TriageAgent variants for each difficulty level
-    # ——————————————————————————————————————————————
+    
+    forced_level = getattr(cfg.triage, 'forced_level', None)
+    
     def create_triage_agent(difficulty_level: str):
-        config = cfg.triage[difficulty_level]  # config: triage.{level}
+        config = cfg.triage[difficulty_level]
         n = config['num_experts']
         fields = get_medical_specialties(cfg)      # config: orchestrate.medical_specialties
         
@@ -147,48 +146,57 @@ async def run_triage_agent(question: str, cfg: DictConfig):
         'hard': create_triage_agent('hard')
     }
     
-    # ——————————————————————————————————————————————
-    # Define TriageAgent that assesses difficulty and coordinates triage
-    # ——————————————————————————————————————————————
-    triage_agent = Agent(
-        name="TriageAgent",
-        model=cfg.execution.model.name,
-        instructions=(
-            f"{_default_cfg.difficulty_system_prompt}\n"
-            f"{_default_cfg.difficulty_template.format(question=question)}"
-        ),
-        model_settings=ModelSettings(
-            temperature=cfg.execution.model.temperature,
-        ),
-        handoffs=[
-            handoff(
-                agent=triage_agents['easy'],
-                tool_name_override="transfer_to_triage_agent_easy",
-                tool_description_override="Transfer to the triage agent for easy questions after assessing difficulty as 'easy'."
+    if forced_level and forced_level in triage_agents:
+        while True:
+            try:
+                result = await Runner.run(
+                    starting_agent=triage_agents[forced_level],
+                    input=question,
+                    context={},
+                )
+                break
+            except Exception:
+                await asyncio.sleep(1)
+    else:
+        triage_agent = Agent(
+            name="TriageAgent",
+            model=cfg.execution.model.name,
+            instructions=(
+                f"{_default_cfg.difficulty_system_prompt}\n"
+                f"{_default_cfg.difficulty_template.format(question=question)}"
             ),
-            handoff(
-                agent=triage_agents['medium'],
-                tool_name_override="transfer_to_triage_agent_medium",
-                tool_description_override="Transfer to the triage agent for medium questions after assessing difficulty as 'medium'."
+            model_settings=ModelSettings(
+                temperature=cfg.execution.model.temperature,
             ),
-            handoff(
-                agent=triage_agents['hard'],
-                tool_name_override="transfer_to_triage_agent_hard",
-                tool_description_override="Transfer to the triage agent for hard questions after assessing difficulty as 'hard'."
-            )
-        ]
-    )
-    
-    while True:
-        try:
-            result = await Runner.run(
-                starting_agent=triage_agent,
-                input=question,
-                context={},
-            )
-            break
-        except Exception:
-            await asyncio.sleep(1)
+            handoffs=[
+                handoff(
+                    agent=triage_agents['easy'],
+                    tool_name_override="transfer_to_triage_agent_easy",
+                    tool_description_override="Transfer to the triage agent for easy questions after assessing difficulty as 'easy'."
+                ),
+                handoff(
+                    agent=triage_agents['medium'],
+                    tool_name_override="transfer_to_triage_agent_medium",
+                    tool_description_override="Transfer to the triage agent for medium questions after assessing difficulty as 'medium'."
+                ),
+                handoff(
+                    agent=triage_agents['hard'],
+                    tool_name_override="transfer_to_triage_agent_hard",
+                    tool_description_override="Transfer to the triage agent for hard questions after assessing difficulty as 'hard'."
+                )
+            ]
+        )
+        
+        while True:
+            try:
+                result = await Runner.run(
+                    starting_agent=triage_agent,
+                    input=question,
+                    context={},
+                )
+                break
+            except Exception:
+                await asyncio.sleep(1)
 
     total_usage = Usage()
     for raw_response in result.raw_responses:
