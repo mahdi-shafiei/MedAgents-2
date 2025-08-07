@@ -2,9 +2,9 @@
 set -e
 
 ## Triage Ablation Study Runner
-DATASETS=("medqa" "medbullets" "medexqa" "medmcqa" "medxpertqa-r" "medxpertqa-u" "mmlu" "mmlu-pro" "pubmedqa")
+DATASETS=("medbullets" "medexqa" "medmcqa" "medqa" "medxpertqa-r" "medxpertqa-u" "mmlu" "mmlu-pro" "pubmedqa")
 SPLIT="test_hard"
-MODEL="gpt-4o-mini"
+MODEL="o3-mini"
 RUN_IDS=(0 1 2)
 
 echo "=========================================="
@@ -19,7 +19,7 @@ echo ""
 EXPERIMENT_NAME="ebagents"
 
 declare -A configs
-configs["new"]="triage.forced_level=hard search.search_mode=web"
+configs["new"]="triage.forced_level=hard search.search_mode=vector"
 
 for RUN_ID in "${RUN_IDS[@]}"; do
     for DATASET in "${DATASETS[@]}"; do 

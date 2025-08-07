@@ -41,33 +41,46 @@ echo ""
 # done
 
 # ## Group 2: Agent Configuration with Triage Disabled
-# EXPERIMENT_NAME="agent_configuration"
+EXPERIMENT_NAME="agent_configuration"
 
-# declare -A configs
-# configs=()
-# configs["1_agent_1_round_no_search"]="triage.forced_level=medium triage.medium.num_experts=1 triage.medium.max_rounds=1 triage.medium.search_mode=none search.search_mode=web"
-# configs["1_agent_1_round_with_search"]="triage.forced_level=medium triage.medium.num_experts=1 triage.medium.max_rounds=1 triage.medium.search_mode=required search.search_mode=web"
-# configs["1_agent_3_rounds_with_search"]="triage.forced_level=medium triage.medium.num_experts=1 triage.medium.max_rounds=3 triage.medium.search_mode=required search.search_mode=web"
-# configs["2_agents_3_rounds_with_search"]="triage.forced_level=medium triage.medium.num_experts=2 triage.medium.max_rounds=3 triage.medium.search_mode=required search.search_mode=web"
-# configs["3_agents_1_round_with_search"]="triage.forced_level=medium triage.medium.num_experts=3 triage.medium.max_rounds=1 triage.medium.search_mode=required search.search_mode=web"
-# configs["3_agents_2_rounds_with_search"]="triage.forced_level=medium triage.medium.num_experts=3 triage.medium.max_rounds=2 triage.medium.search_mode=required search.search_mode=web"
-# configs["3_agents_3_rounds_with_search"]="triage.forced_level=medium triage.medium.num_experts=3 triage.medium.max_rounds=3 triage.medium.search_mode=required search.search_mode=web"
-# configs["5_agents_1_round_with_search"]="triage.forced_level=medium triage.medium.num_experts=5 triage.medium.max_rounds=1 triage.medium.search_mode=required search.search_mode=web"
+declare -A configs
+configs=()
+configs["1_agent_1_round_no_search"]="triage.forced_level=medium triage.medium.num_experts=1 triage.medium.max_rounds=1 triage.medium.search_mode=none search.search_mode=web"
+configs["1_agent_1_round_with_search"]="triage.forced_level=medium triage.medium.num_experts=1 triage.medium.max_rounds=1 triage.medium.search_mode=required search.search_mode=web"
+configs["1_agent_2_round_with_search"]="triage.forced_level=medium triage.medium.num_experts=1 triage.medium.max_rounds=2 triage.medium.search_mode=required search.search_mode=web"
+configs["1_agent_3_rounds_with_search"]="triage.forced_level=medium triage.medium.num_experts=1 triage.medium.max_rounds=3 triage.medium.search_mode=required search.search_mode=web"
+configs["2_agents_1_round_with_search"]="triage.forced_level=medium triage.medium.num_experts=2 triage.medium.max_rounds=1 triage.medium.search_mode=required search.search_mode=web"
+configs["2_agents_1_round_no_search"]="triage.forced_level=medium triage.medium.num_experts=2 triage.medium.max_rounds=1 triage.medium.search_mode=none search.search_mode=web"
+configs["2_agents_2_rounds_with_search"]="triage.forced_level=medium triage.medium.num_experts=2 triage.medium.max_rounds=2 triage.medium.search_mode=required search.search_mode=web"
+configs["2_agents_3_rounds_with_search"]="triage.forced_level=medium triage.medium.num_experts=2 triage.medium.max_rounds=3 triage.medium.search_mode=required search.search_mode=web"
+configs["2_agents_3_rounds_no_search"]="triage.forced_level=medium triage.medium.num_experts=2 triage.medium.max_rounds=3 triage.medium.search_mode=none search.search_mode=web"
+configs["3_agents_1_round_no_search"]="triage.forced_level=medium triage.medium.num_experts=3 triage.medium.max_rounds=1 triage.medium.search_mode=none search.search_mode=web"
+configs["3_agents_1_round_with_search"]="triage.forced_level=medium triage.medium.num_experts=3 triage.medium.max_rounds=1 triage.medium.search_mode=required search.search_mode=web"
+configs["3_agents_2_rounds_no_search"]="triage.forced_level=medium triage.medium.num_experts=3 triage.medium.max_rounds=2 triage.medium.search_mode=none search.search_mode=web"
+configs["3_agents_2_rounds_with_search"]="triage.forced_level=medium triage.medium.num_experts=3 triage.medium.max_rounds=2 triage.medium.search_mode=required search.search_mode=web"
+configs["3_agents_3_rounds_with_search"]="triage.forced_level=medium triage.medium.num_experts=3 triage.medium.max_rounds=3 triage.medium.search_mode=required search.search_mode=web"
+configs["3_agents_3_rounds_no_search"]="triage.forced_level=medium triage.medium.num_experts=3 triage.medium.max_rounds=3 triage.medium.search_mode=none search.search_mode=web"
+configs["5_agents_1_round_with_search"]="triage.forced_level=medium triage.medium.num_experts=5 triage.medium.max_rounds=1 triage.medium.search_mode=required search.search_mode=web"
+configs["5_agents_1_round_no_search"]="triage.forced_level=medium triage.medium.num_experts=5 triage.medium.max_rounds=1 triage.medium.search_mode=none search.search_mode=web"
+configs["5_agents_2_rounds_with_search"]="triage.forced_level=medium triage.medium.num_experts=5 triage.medium.max_rounds=2 triage.medium.search_mode=required search.search_mode=web"
+configs["5_agents_2_rounds_no_search"]="triage.forced_level=medium triage.medium.num_experts=5 triage.medium.max_rounds=2 triage.medium.search_mode=none search.search_mode=web"
+configs["5_agents_3_rounds_with_search"]="triage.forced_level=medium triage.medium.num_experts=5 triage.medium.max_rounds=3 triage.medium.search_mode=required search.search_mode=web"
+configs["5_agents_3_rounds_no_search"]="triage.forced_level=medium triage.medium.num_experts=5 triage.medium.max_rounds=3 triage.medium.search_mode=none search.search_mode=web"
 
-# for RUN_ID in "${RUN_IDS[@]}"; do
-#     for ablation in "${!configs[@]}"; do
-#         echo "Running $ablation ablation..."
-#         python run_experiments.py \
-#             execution.dataset.name=$DATASET \
-#             execution.dataset.split=$SPLIT \
-#             execution.model.name=$MODEL \
-#             execution.experiments.run_id=$RUN_ID \
-#             execution.experiment_name=${EXPERIMENT_NAME}/$ablation \
-#             ${configs[$ablation]}
-#         echo "Completed $ablation ablation."
-#         echo ""
-#     done
-# done
+for RUN_ID in "${RUN_IDS[@]}"; do
+    for ablation in "${!configs[@]}"; do
+        echo "Running $ablation ablation..."
+        python run_experiments.py \
+            execution.dataset.name=$DATASET \
+            execution.dataset.split=$SPLIT \
+            execution.model.name=$MODEL \
+            execution.experiments.run_id=$RUN_ID \
+            execution.experiment_name=${EXPERIMENT_NAME}/$ablation \
+            ${configs[$ablation]}
+        echo "Completed $ablation ablation."
+        echo ""
+    done
+done
 
 ## Group 3: Custom Configuration Experiments
 EXPERIMENT_NAME="triage_configuration"

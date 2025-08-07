@@ -1,0 +1,38 @@
+# MedAgents matplotlib style file
+# Standard plot styling for MedAgents figures
+
+# Font settings
+font.size: 10
+font.family: sans-serif
+
+# Figure settings
+figure.dpi: 300
+figure.facecolor: white
+
+# Axes settings
+axes.linewidth: 0.8
+axes.spines.top: False
+axes.spines.right: False
+axes.facecolor: white
+axes.grid: True
+grid.alpha: 0.2
+grid.linewidth: 0.5
+
+# Tick settings
+xtick.major.size: 4
+ytick.major.size: 4
+xtick.major.width: 0.8
+ytick.major.width: 0.8
+xtick.labelsize: 10
+ytick.labelsize: 10
+
+# Legend settings
+legend.frameon: False
+legend.fontsize: 9
+
+# Line settings
+lines.linewidth: 2
+lines.markersize: 6
+
+# Patch settings
+patch.linewidth: 1.5 

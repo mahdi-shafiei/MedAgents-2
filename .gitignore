@@ -1,12 +1,15 @@
-# Ignore all .npy files
+# Data files
 *.npy
-
-# Ignore all .json files
 *.json
+*.csv
 
+# Generated figures
+figures/*.png
+figures/*.pdf
+
+# Output directories
 baselines/*/output/
 baselines/*/logs/
-# Ignore logs directory
 logs/**
 output/**
 outputs/**

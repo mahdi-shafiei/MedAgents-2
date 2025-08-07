@@ -5,7 +5,7 @@ set -e
 # Configuration - Available datasets: medbullets, medexqa, medmcqa, medqa, medxpertqa-r, medxpertqa-u, mmlu, mmlu-pro, pubmedqa
 DATASETS=("medbullets" "medexqa" "medmcqa" "medqa" "medxpertqa-r" "medxpertqa-u" "mmlu" "mmlu-pro" "pubmedqa")
 SPLIT="test_hard"
-MODEL="gpt-4o-mini"
+MODEL="gpt-4o"
 RUN_IDS=(0 1 2)
 
 echo "=========================================="

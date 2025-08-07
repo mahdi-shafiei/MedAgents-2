@@ -5,7 +5,7 @@ set -e
 DATASET="medqa"
 SPLIT="test_hard"
 MODEL="gpt-4o-mini"
-RUN_IDS=(0)
+RUN_IDS=(0 1 2)
 
 echo "=========================================="
 echo "Running MedAgents-2 Orchestrate Ablation Study"

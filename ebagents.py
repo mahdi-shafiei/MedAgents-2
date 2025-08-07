@@ -155,7 +155,8 @@ class EBMedAgents:
         """Calculate total usage across all agents."""
         total_usage = Usage()
         for agent_usage in self.log.usage_stats:
-            total_usage.add(agent_usage.usage)
+            if agent_usage.usage is not None:
+                total_usage.add(agent_usage.usage)
         self.log.total_usage = total_usage
 
     def get_usage_by_type(self) -> Dict[str, Usage]:
@@ -267,6 +268,8 @@ class EBMedAgents:
         for er in expert_results:
             ans = er.result.response.answer
             conf = conf_map.get(er.result.response.confidence.lower(), 1.0)
+            if ans not in options:
+                continue
             vote_scores[ans] += er.weight * conf
         
         total = sum(vote_scores.values())
