@@ -2,7 +2,6 @@ import pandas as pd
 
 df = pd.read_csv('main_comparison.csv')
 
-df = df.sort_values(['model', 'dataset', 'exp_name'])
+df = df.sort_values(['method', 'model', 'dataset'], ascending=[True, True, True])
 
-print(df['exp_name'].unique())
 df.to_csv('main_comparison.csv', index=False)

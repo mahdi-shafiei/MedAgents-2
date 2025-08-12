@@ -9,32 +9,17 @@ from plot_style import set_plot_style, get_color_scheme, get_marker_styles, get_
 set_plot_style()
 
 df = pd.read_csv('main_comparison.csv')
-df.rename(columns={'exp_name': 'method'}, inplace=True)
 
-fig = plt.figure(figsize=(24, 20))
-gs = fig.add_gridspec(2, 3, height_ratios=[1, 1],  width_ratios=[1.5, 1, 1],
-                      hspace=0.2, wspace=0.3)
+fig = plt.figure(figsize=(26, 22))
+gs = fig.add_gridspec(2, 3, height_ratios=[1.2, 1],  width_ratios=[2, 1, 1],
+                      hspace=0.15, wspace=0.6)
 
-colors = get_color_scheme('figure_1')
+colors = get_color_scheme('figure_0', theme='manchester_united_official')
 marker_styles = get_marker_styles()
 line_styles = get_line_styles()
 background_colors = get_background_colors()
-manchester_colors = get_colors('manchester_united_official')
 
-method_colors = {
-    'EBAgents': manchester_colors['jasmine'],
-    'AFlow': manchester_colors['sunset'],
-    'Self-refine': manchester_colors['sandy_brown'],
-    'MultiPersona': manchester_colors['persimmon'],
-    'SPO': manchester_colors['barn_red'],
-    'CoT': manchester_colors['penn_red'],
-    'CoT-SC': manchester_colors['engineering_orange'],
-    'MedAgents': manchester_colors['pink'],
-    'MedPrompt': manchester_colors['snow'],
-    'Few-shot': manchester_colors['gray'],
-    'MDAgents': manchester_colors['jet'],
-    'Zero-shot': manchester_colors['black']
-}
+method_colors = colors.get('methods', {})
 
 dataset_mapping = {
     'medbullets': 'MedBullets',
@@ -48,8 +33,8 @@ dataset_mapping = {
     'pubmedqa': 'PubMedQA',
 }
 
-models = ['gpt-4o', 'gpt-4o-mini']
-methods = ['CoT', 'CoT-SC', 'MedPrompt', 'MultiPersona', 'MedAgents', 'AFlow', 'EBAgents', 'Few-shot', 'MDAgents', 'SPO', 'Self-refine', 'Zero-shot']
+models = ['o3-mini', 'gpt-4o', 'gpt-4o-mini']
+methods = ['CoT', 'CoT-SC', 'MedPrompt', 'MultiPersona', 'MedAgents', 'AFlow', 'EBAgents', 'Few-shot', 'MDAgents', 'SPO', 'Self-refine',  'MedRAG', 'Zero-shot']
 df['dataset'] = df['dataset'].map(dataset_mapping)
 datasets = list(df['dataset'].unique())
 
@@ -89,8 +74,10 @@ for method in methods:
 overall_means.sort(key=lambda x: x[1], reverse=True)
 methods_sorted = [item[0] for item in overall_means]
 
-bar_width = 0.35
+bar_width = 0.3
 x_positions = np.arange(len(methods_sorted))
+
+alphas = [0.9, 0.7, 0.5]
 
 for i, model in enumerate(models):
     model_means = []
@@ -111,17 +98,18 @@ for i, model in enumerate(models):
     
     bars = ax1.bar(x_pos, model_means, bar_width,
                    color=[method_colors[method] for method in methods_sorted],
-                   alpha=0.8 if i == 0 else 0.4,
-                   edgecolor='black', linewidth=2,
-                   label=f'{model} (Accuracy)')
+                   alpha=alphas[i],
+                   edgecolor='black', linewidth=1.5,
+                   label=f'{model}')
     
     ax1.errorbar(x_pos, model_means, yerr=model_stds, fmt='none',
-                 ecolor='black', capsize=3, capthick=2, linewidth=2)
+                 ecolor='black', capsize=4, capthick=2, linewidth=2, alpha=0.8)
     
     for j, (x, mean, values) in enumerate(zip(x_pos, model_means, model_values_list)):
         if len(values) > 0:
             for value in values:
-                ax1.plot(x, value, 'o', color='black', markersize=3, alpha=0.6)
+                ax1.plot(x, value, 'o', color='darkred' if i == 0 else 'darkblue', 
+                        markersize=4, alpha=0.7, markeredgecolor='black', markeredgewidth=0.5)
 
 ax1_twin = ax1.twinx()
 
@@ -137,86 +125,66 @@ for i, model in enumerate(models):
             model_time_means.append(0)
             model_time_stds.append(0)
     
-    line_color = 'darkblue' if i == 0 else 'darkred'
+    line_color = 'navy' if i == 0 else 'maroon'
     line_style = '-' if i == 0 else '--'
-    marker_style = 'o' if i == 0 else 's'
+    marker_style = 'D' if i == 0 else '^'
     
     ax1_twin.plot(x_positions, model_time_means, color=line_color, linestyle=line_style,
-                  marker=marker_style, markersize=6, linewidth=2, alpha=0.8,
-                  label=f'{model} (Time)')
+                  marker=marker_style, markersize=10, linewidth=4, alpha=0.9,
+                  label=f'{model} (Time)', markeredgecolor='white', markeredgewidth=1)
     
     ax1_twin.errorbar(x_positions, model_time_means, yerr=model_time_stds, fmt='none',
-                      ecolor=line_color, capsize=2, capthick=1, linewidth=1, alpha=0.6)
+                      ecolor=line_color, capsize=3, capthick=2, linewidth=2, alpha=0.7)
 
 best_method_idx = 0
 best_method = methods_sorted[0]
 best_x = x_positions[best_method_idx]
 best_y = max([method_stats[best_method]['accuracy'][model]['mean'] for model in models if model in method_stats[best_method]['accuracy']])
 
-ax1.plot(best_x, best_y + 2, marker='*', markersize=15, color='gold', 
-         markeredgecolor='black', markeredgewidth=2, zorder=10, label='Best performing')
+ax1.plot(best_x, best_y + 3, marker='*', markersize=25, color='gold', 
+         markeredgecolor='black', markeredgewidth=3, zorder=15, label='Best Overall')
 
-ax1.set_ylim(10, 45)
-ax1.set_ylabel('Accuracy (%)', fontweight='bold', fontsize=12)
-ax1_twin.set_ylabel('Time (s)', fontweight='bold', fontsize=12)
-ax1.set_xlabel('Method', fontweight='bold', fontsize=12)
+ax1.set_ylim(8, 48)
+ax1.set_ylabel('Accuracy (%)', fontweight='bold', fontsize=18)
+ax1_twin.set_ylabel('Execution Time (seconds)', fontweight='bold', fontsize=18)
+ax1.set_xlabel('Methods (Ranked by Performance)', fontweight='bold', fontsize=18)
 
 ax1.set_xticks(x_positions)
-ax1.set_xticklabels(methods_sorted, fontsize=12)
-ax1.tick_params(axis='both', labelsize=11)
-ax1.grid(True, alpha=0.3, axis='y', linewidth=0.5)
-apply_standard_plot_formatting(ax1, 'a', background_color=background_colors['white'])
-ax1.set_title('Performance Comparison by Method and Model', fontsize=14, fontweight='bold', pad=20)
+ax1.set_xticklabels(methods_sorted, fontsize=15)
+ax1.tick_params(axis='both', labelsize=15)
+ax1_twin.tick_params(axis='both', labelsize=15)
+ax1.grid(True, alpha=0.4, axis='y', linewidth=0.8, linestyle=':')
+apply_standard_plot_formatting(ax1, 'a', background_color=background_colors['white'], fontsize=25)
 
 method_legend_elements = []
-for method in methods_sorted:
+for method in methods_sorted[:6]:
     method_legend_elements.append(plt.Rectangle((0, 0), 1, 1, facecolor=method_colors[method], alpha=0.8, 
                                               edgecolor='black', linewidth=1.5, label=method))
 
 model_legend_elements = []
 for i, model in enumerate(models):
-    alpha_value = 0.8 if i == 0 else 0.4
-    model_legend_elements.append(plt.Rectangle((0, 0), 1, 1, facecolor='gray', alpha=alpha_value,
-                                             edgecolor='black', linewidth=1.5, label=model))
+    model_legend_elements.append(plt.Rectangle((0, 0), 1, 1, facecolor='gray', alpha=alphas[i],
+                                             edgecolor='black', linewidth=1.5, label=f'{model} (Accuracy)'))
 
 time_legend_elements = []
 for i, model in enumerate(models):
-    line_color = 'darkblue' if i == 0 else 'darkred'
+    line_color = 'navy' if i == 0 else 'maroon'
     line_style = '-' if i == 0 else '--'
-    marker_style = 'o' if i == 0 else 's'
+    marker_style = 'D' if i == 0 else '^'
     time_legend_elements.append(plt.Line2D([0], [0], color=line_color, linestyle=line_style,
-                                         marker=marker_style, markersize=6, linewidth=2,
-                                         label=f'{model} (Time)'))
+                                         marker=marker_style, markersize=10, linewidth=4,
+                                         label=f'{model} (Time)', markeredgecolor='white', markeredgewidth=1))
 
-if best_method:
-    special_legend_elements = [plt.Line2D([0], [0], marker='*', color='w', markerfacecolor='gold',
-                                        markeredgecolor='black', markeredgewidth=2, markersize=15,
-                                        label='Best performing', linestyle='None')]
+special_legend_elements = [plt.Line2D([0], [0], marker='*', color='w', markerfacecolor='gold',
+                                    markeredgecolor='black', markeredgewidth=3, markersize=25,
+                                    label='Best Overall', linestyle='None')]
 
-method_legend = ax1.legend(handles=method_legend_elements, loc='center left', bbox_to_anchor=(1.05, 0.7), 
-                          title='Methods', fontsize=9, ncol=1,
-                          frameon=True, fancybox=True, shadow=True, framealpha=1.0, 
-                          facecolor='white', edgecolor='black', title_fontsize=10)
+combined_legend_elements = model_legend_elements + time_legend_elements + special_legend_elements
 
-model_legend = ax1.legend(handles=model_legend_elements, loc='center left', bbox_to_anchor=(1.05, 0.4),
-                         title='Models (Accuracy)', fontsize=9, ncol=1,
-                         frameon=True, fancybox=True, shadow=True, framealpha=1.0,
-                         facecolor='white', edgecolor='black', title_fontsize=10)
-
-time_legend = ax1.legend(handles=time_legend_elements, loc='center left', bbox_to_anchor=(1.05, 0.2),
-                        title='Models (Time)', fontsize=9, ncol=1,
-                        frameon=True, fancybox=True, shadow=True, framealpha=1.0,
-                        facecolor='white', edgecolor='black', title_fontsize=10)
-
-if best_method:
-    special_legend = ax1.legend(handles=special_legend_elements, loc='center left', bbox_to_anchor=(1.05, 0.05),
-                               title='Special', fontsize=9, ncol=1,
-                               frameon=True, fancybox=True, shadow=True, framealpha=1.0,
-                               facecolor='white', edgecolor='black', title_fontsize=10)
-
-ax1.add_artist(method_legend)
-ax1.add_artist(model_legend)
-ax1.add_artist(time_legend)
+ax1.legend(handles=combined_legend_elements, loc='upper right', bbox_to_anchor=(0.98, 0.98), 
+          title='Legend', fontsize=13, ncol=1,
+          frameon=True, fancybox=True, shadow=True, framealpha=0.95, 
+          facecolor='white', edgecolor='black', title_fontsize=15)
 
 ax2 = fig.add_subplot(gs[1, 1:])
 
@@ -228,22 +196,22 @@ dataset_performance = df.groupby(['dataset', 'method']).agg({
 
 datasets_sorted = sorted(datasets)
 
-x_positions = {method: i for i, method in enumerate(methods)}
-y_positions = {dataset: i for i, dataset in enumerate(datasets_sorted)}
+x_positions_heatmap = {method: i for i, method in enumerate(methods)}
+y_positions_heatmap = {dataset: i for i, dataset in enumerate(datasets_sorted)}
 
 for _, row in dataset_performance.iterrows():
     if row['method'] in methods:
-        x = x_positions[row['method']]
-        y = y_positions[row['dataset']]
+        x = x_positions_heatmap[row['method']]
+        y = y_positions_heatmap[row['dataset']]
         
-        bubble_size = (row['accuracy'] / 50) * 1000
-        bubble_alpha = min(1.0, max(0.5, row['accuracy'] / 50))
+        bubble_size = (row['accuracy'] / 45) * 1200
+        bubble_alpha = min(1.0, max(0.6, row['accuracy'] / 45))
         
-        time_normalized = min(1.0, row['avg_time'] / 60)
-        edge_width = 1 + time_normalized * 3
+        time_normalized = min(1.0, row['avg_time'] / 80)
+        edge_width = 2 + time_normalized * 4
         
-        cost_normalized = min(1.0, (row['avg_cost'] * 100) / 50)
-        edge_alpha = 0.3 + cost_normalized * 0.7
+        cost_normalized = min(1.0, (row['avg_cost'] * 100) / 60)
+        edge_alpha = 0.4 + cost_normalized * 0.6
         
         bubble = ax2.scatter(x, y, 
                            s=bubble_size,
@@ -254,51 +222,51 @@ for _, row in dataset_performance.iterrows():
                            zorder=5)
         
         if row['accuracy'] > 0:
+            text_color = 'white' if row['accuracy'] > 25 else 'black'
             ax2.annotate(f"{row['accuracy']:.1f}%", 
                         (x, y), 
                         xytext=(0, 0), 
                         textcoords='offset points',
                         ha='center', 
                         va='center',
-                        fontsize=8,
+                        fontsize=11,
                         fontweight='bold',
-                        color='black',
-                        alpha=0.7,
+                        color=text_color,
+                        alpha=0.9,
                         zorder=10)
 
 for i, method in enumerate(methods):
-    ax2.axvline(x=i, color='gray', alpha=0.2, linewidth=0.5, zorder=1)
+    ax2.axvline(x=i, color='lightgray', alpha=0.5, linewidth=1, zorder=1)
 
 for i, dataset in enumerate(datasets_sorted):
-    ax2.axhline(y=i, color='gray', alpha=0.2, linewidth=0.5, zorder=1)
+    ax2.axhline(y=i, color='lightgray', alpha=0.5, linewidth=1, zorder=1)
 
 ax2.set_xlim(-0.5, len(methods) - 0.5)
 ax2.set_ylim(-0.5, len(datasets_sorted) - 0.5)
 
 ax2.set_xticks(range(len(methods)))
-ax2.set_xticklabels(methods, rotation=45, ha='right', fontsize=12)
+ax2.set_xticklabels(methods, rotation=45, ha='right', fontsize=15)
 ax2.set_yticks(range(len(datasets_sorted)))
-ax2.set_yticklabels(datasets_sorted, fontsize=12)
+ax2.set_yticklabels(datasets_sorted, fontsize=15, rotation=45)
 
-ax2.set_xlabel('Method', fontweight='bold', fontsize=12)
-ax2.set_ylabel('Dataset', fontweight='bold', fontsize=12)
-ax2.tick_params(axis='both', labelsize=11)
+ax2.set_xlabel('Methods', fontweight='bold', fontsize=18)
+ax2.set_ylabel('Medical Datasets', fontweight='bold', fontsize=18)
+ax2.tick_params(axis='both', labelsize=15)
 
 legend_elements = []
-for size, label in [(200, '10%'), (500, '25%'), (800, '40%')]:
-    legend_elements.append(plt.scatter([], [], s=size, c='gray', alpha=0.6, 
-                                     edgecolors='black', linewidths=1, label=f'{label} Accuracy'))
+for size, label in [(300, '15%'), (600, '30%'), (1000, '45%')]:
+    legend_elements.append(plt.scatter([], [], s=size, c='gray', alpha=0.7, 
+                                     edgecolors='black', linewidths=2, label=f'{label} Accuracy'))
 
-legend_elements.append(plt.Line2D([0], [0], color='black', linewidth=1, label='Low Time'))
-legend_elements.append(plt.Line2D([0], [0], color='black', linewidth=4, label='High Time'))
+legend_elements.append(plt.Line2D([0], [0], color='black', linewidth=2, label='Low Time/Cost'))
+legend_elements.append(plt.Line2D([0], [0], color='black', linewidth=6, label='High Time/Cost'))
 
-ax2.legend(handles=legend_elements, loc='center left', bbox_to_anchor=(1.02, 0.5), 
-          title='Bubble Size: Accuracy\nEdge Width: Time', fontsize=9, title_fontsize=10,
-          frameon=True, fancybox=True, shadow=True, framealpha=1.0,
+ax2.legend(handles=legend_elements, loc='center left', bbox_to_anchor=(1.0, 0.5), 
+          title='Bubble Size: Accuracy\nEdge Width: Time & Cost', fontsize=13, title_fontsize=15,
+          frameon=True, fancybox=True, shadow=True, framealpha=0.95,
           facecolor='white', edgecolor='black')
 
-apply_standard_plot_formatting(ax2, 'c', background_color=background_colors['white'])
-ax2.set_title('Method Performance Matrix Across Datasets', fontsize=14, fontweight='bold', pad=20)
+apply_standard_plot_formatting(ax2, 'c', background_color=background_colors['white'], fontsize=25)
 
 ax4 = fig.add_subplot(gs[1, 0])
 
@@ -312,15 +280,15 @@ for _, row in avg_metrics.iterrows():
     if row['method'] == 'EBAgents':
         ax4.scatter(row['avg_cost'], row['accuracy'], 
                    c=method_colors[row['method']], 
-                   s=400, alpha=0.8, 
-                   edgecolors='black', linewidth=2,
-                   label=row['method'], marker='*')
+                   s=500, alpha=0.9, 
+                   edgecolors='black', linewidth=3,
+                   label=row['method'], marker='*', zorder=10)
     else:
         ax4.scatter(row['avg_cost'], row['accuracy'], 
                    c=method_colors[row['method']], 
-                   s=200, alpha=0.8, 
+                   s=250, alpha=0.8, 
                    edgecolors='black', linewidth=2,
-                   label=row['method'])
+                   label=row['method'], zorder=5)
 
 pareto_indices = []
 sorted_indices = np.argsort(avg_metrics['avg_cost'])
@@ -332,21 +300,30 @@ for i in sorted_indices:
 
 if len(pareto_indices) > 1:
     pareto_data = avg_metrics.iloc[pareto_indices].sort_values('avg_cost')
-    ax4.plot(pareto_data['avg_cost'], pareto_data['accuracy'], 'k--', alpha=0.7, linewidth=2, label='Pareto Frontier')
+    ax4.plot(pareto_data['avg_cost'], pareto_data['accuracy'], 'k--', alpha=0.8, linewidth=3, 
+            label='Pareto Frontier', zorder=8)
 
 for _, row in avg_metrics.iterrows():
+    offset_x = 12 if row['method'] != 'EBAgents' else 15
+    offset_y = 10 if row['method'] != 'EBAgents' else 12
     ax4.annotate(row['method'], (row['avg_cost'], row['accuracy']), 
-                xytext=(8, 8), textcoords='offset points', 
-                fontsize=10, ha='left', va='bottom', fontweight='bold',
-                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8, edgecolor='gray'))
+                xytext=(offset_x, offset_y), textcoords='offset points', 
+                fontsize=13, ha='left', va='bottom', fontweight='bold',
+                bbox=dict(boxstyle='round,pad=0.4', facecolor='white', alpha=0.9, 
+                         edgecolor='gray', linewidth=1.5))
 
-ax4.set_xlabel('Average Cost (¢)', fontweight='bold', fontsize=12)
-ax4.set_ylabel('Average Accuracy (%)', fontweight='bold', fontsize=12)
-ax4.set_ylim(16, 32)
-ax4.tick_params(axis='both', labelsize=11)
-ax4.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
-apply_standard_plot_formatting(ax4, 'b', background_color=background_colors['white'])
-ax4.set_title('Cost-Accuracy Trade-off', fontsize=12, fontweight='bold', pad=20)
+ax4.set_xlabel('Average Cost (cents per query)', fontweight='bold', fontsize=18)
+ax4.set_ylabel('Average Accuracy (%)', fontweight='bold', fontsize=18)
+ax4.set_ylim(14, 34)
+ax4.tick_params(axis='both', labelsize=15)
+ax4.grid(True, alpha=0.4, linestyle=':', linewidth=1)
+apply_standard_plot_formatting(ax4, 'b', background_color=background_colors['white'], fontsize=25)
+
+pareto_legend = [plt.Line2D([0], [0], color='black', linestyle='--', linewidth=3, 
+                           label='Pareto Frontier', alpha=0.8)]
+ax4.legend(handles=pareto_legend, loc='lower right', fontsize=13, 
+          frameon=True, fancybox=True, shadow=True, framealpha=0.95,
+          facecolor='white', edgecolor='black')
 
 plt.tight_layout()
 plt.savefig('main_comparison.pdf', dpi=300, bbox_inches='tight', facecolor='white')

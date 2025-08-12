@@ -14,11 +14,10 @@ fig = plt.figure(figsize=(16, 10))
 gs = fig.add_gridspec(2, 2, height_ratios=[1, 1], width_ratios=[1, 1.5], 
                       hspace=0.4, wspace=0.5)
 
-colors = get_color_scheme('figure_2')
+colors = get_color_scheme('figure_2', theme='manchester_united_official')
 marker_styles = get_marker_styles()
 line_styles = get_line_styles()
 background_colors = get_background_colors()
-manchester_colors = get_colors('manchester_united')
 
 ax1 = fig.add_subplot(gs[0, 0])
 
@@ -49,24 +48,24 @@ for i, (bar, acc, cost) in enumerate(zip(bars1, accuracies, costs)):
         reduction = ((best_accuracy - acc) / best_accuracy) * 100
         ax1.text(bar.get_x() + bar.get_width()/2., height + 3,
                  f'↓{reduction:.0f}%', ha='center', va='bottom', fontsize=10, 
-                 fontweight='bold', color='grey', 
-                 bbox=dict(boxstyle='round,pad=0.3', facecolor='lightgrey', alpha=0.7))
+                 fontweight='bold', color=colors['annotations']['text_box_edge'], 
+                 bbox=dict(boxstyle='round,pad=0.3', facecolor=colors['annotations']['text_box_face'], alpha=0.7))
 
 for i, (bar, time) in enumerate(zip(bars2, times)):
     height = bar.get_height()
     ax1_twin.text(bar.get_x() + bar.get_width()/2., height + 5,
                   f'{time:.0f}s', ha='center', va='bottom', fontsize=9, fontweight='bold')
 
-ax1.set_xlabel('Search Modality', fontweight='bold', fontsize=11)
-ax1.set_ylabel('Accuracy (%)', fontweight='bold', color=colors['metrics']['accuracy'], fontsize=11)
-ax1_twin.set_ylabel('Time (s)', fontweight='bold', color=colors['metrics']['time'], fontsize=11)
+ax1.set_xlabel('Search Modality', fontweight='bold', fontsize=11, color='black')
+ax1.set_ylabel('Accuracy (%)', fontweight='bold', color='black', fontsize=11)
+ax1_twin.set_ylabel('Time (s)', fontweight='bold', color='black', fontsize=11)
 ax1.set_xticks(np.arange(len(modality_names)))
 ax1.set_xticklabels(modality_names, fontsize=10)
-ax1.tick_params(axis='both', labelsize=10)
+ax1.tick_params(axis='both', labelsize=10, colors='black')
+ax1_twin.tick_params(axis='both', labelsize=10, colors='black')
 ax1.set_ylim(0, 40)
 ax1_twin.set_ylim(0, 400)
 apply_standard_plot_formatting(ax1, 'a', background_color=background_colors['white'])
-ax1.set_title('Search Modality Comparison', fontsize=12, fontweight='bold', pad=35)
 
 lines1, labels1 = ax1.get_legend_handles_labels()
 lines2, labels2 = ax1_twin.get_legend_handles_labels()
@@ -101,24 +100,24 @@ for i, (bar, acc, cost) in enumerate(zip(bars1, feature_accuracies, feature_cost
         reduction = ((best_feature_accuracy - acc) / best_feature_accuracy) * 100
         ax2.text(bar.get_x() + bar.get_width()/2., height + 3,
                  f'↓{reduction:.0f}%', ha='center', va='bottom', fontsize=10, 
-                 fontweight='bold', color='grey', 
-                 bbox=dict(boxstyle='round,pad=0.3', facecolor='lightgrey', alpha=0.7))
+                 fontweight='bold', color=colors['annotations']['text_box_edge'], 
+                 bbox=dict(boxstyle='round,pad=0.3', facecolor=colors['annotations']['text_box_face'], alpha=0.7))
 
 for i, (bar, time) in enumerate(zip(bars2, feature_times)):
     height = bar.get_height()
     ax2_twin.text(bar.get_x() + bar.get_width()/2., height + 10,
                   f'{time:.0f}s', ha='center', va='bottom', fontsize=9, fontweight='bold')
 
-ax2.set_xlabel('Search Features', fontweight='bold', fontsize=11)
-ax2.set_ylabel('Accuracy (%)', fontweight='bold', color=colors['metrics']['accuracy'], fontsize=11)
-ax2_twin.set_ylabel('Time (s)', fontweight='bold', color=colors['metrics']['time'], fontsize=11)
+ax2.set_xlabel('Search Features', fontweight='bold', fontsize=11, color='black')
+ax2.set_ylabel('Accuracy (%)', fontweight='bold', color='black', fontsize=11)
+ax2_twin.set_ylabel('Time (s)', fontweight='bold', color='black', fontsize=11)
 ax2.set_xticks(np.arange(len(feature_names)))
 ax2.set_xticklabels(feature_names, fontsize=10)
-ax2.tick_params(axis='both', labelsize=10)
+ax2.tick_params(axis='both', labelsize=10, colors='black')
+ax2_twin.tick_params(axis='both', labelsize=10, colors='black')
 ax2.set_ylim(0, 40)
 ax2_twin.set_ylim(0, 600)
 apply_standard_plot_formatting(ax2, 'b', background_color=background_colors['white'])
-ax2.set_title('Search Features Ablation', fontsize=12, fontweight='bold', pad=35)
 
 lines1, labels1 = ax2.get_legend_handles_labels()
 lines2, labels2 = ax2_twin.get_legend_handles_labels()
@@ -154,24 +153,24 @@ for i, (bar, acc, cost) in enumerate(zip(bars1, history_accuracies, history_cost
         reduction = ((best_history_accuracy - acc) / best_history_accuracy) * 100
         ax4.text(bar.get_x() + bar.get_width()/2., height + 3,
                  f'↓{reduction:.0f}%', ha='center', va='bottom', fontsize=10, 
-                 fontweight='bold', color='grey', 
-                 bbox=dict(boxstyle='round,pad=0.3', facecolor='lightgrey', alpha=0.7))
+                 fontweight='bold', color=colors['annotations']['text_box_edge'], 
+                 bbox=dict(boxstyle='round,pad=0.3', facecolor=colors['annotations']['text_box_face'], alpha=0.7))
 
 for i, (bar, time) in enumerate(zip(bars2, history_times)):
     height = bar.get_height()
     ax4_twin.text(bar.get_x() + bar.get_width()/2., height + 30,
                   f'{time:.0f}s', ha='center', va='bottom', fontsize=9, fontweight='bold')
 
-ax4.set_xlabel('History Strategy', fontweight='bold', fontsize=11)
-ax4.set_ylabel('Accuracy (%)', fontweight='bold', color=colors['metrics']['accuracy'], fontsize=11)
-ax4_twin.set_ylabel('Time (s)', fontweight='bold', color=colors['metrics']['time'], fontsize=11)
+ax4.set_xlabel('History Strategy', fontweight='bold', fontsize=11, color='black')
+ax4.set_ylabel('Accuracy (%)', fontweight='bold', color='black', fontsize=11)
+ax4_twin.set_ylabel('Time (s)', fontweight='bold', color='black', fontsize=11)
 ax4.set_xticks(x_pos)
 ax4.set_xticklabels(history_names, fontsize=10)
-ax4.tick_params(axis='both', labelsize=10)
+ax4.tick_params(axis='both', labelsize=10, colors='black')
+ax4_twin.tick_params(axis='both', labelsize=10, colors='black')
 ax4.set_ylim(0, 40)
 ax4_twin.set_ylim(0, 1800)
 apply_standard_plot_formatting(ax4, 'c', background_color=background_colors['white'])
-ax4.set_title('Search History Strategy', fontsize=12, fontweight='bold', pad=35)
 
 lines1, labels1 = ax4.get_legend_handles_labels()
 lines2, labels2 = ax4_twin.get_legend_handles_labels()
@@ -236,14 +235,9 @@ feature_sizes = {
     'minimal': 60
 }
 
-history_colors = {
-    'individual': manchester_colors['red_dark'],
-    'shared': manchester_colors['gold_dark']
-}
-
 for _, row in all_data.iterrows():
     ax6.scatter(row['cost_cents'], row['accuracy'], 
-               c=history_colors[row['history_type']], 
+               c=colors['history'][row['history_type']], 
                marker=modality_shapes[row['search_modality']],
                alpha=0.8, s=feature_sizes[row['feature_level']], 
                edgecolors='black', linewidth=1.5)
@@ -282,7 +276,7 @@ for _, row in pareto_sorted.iterrows():
         ax6.annotate(label, (row['cost_cents'], row['accuracy']), 
                     xytext=(8, 8), textcoords='offset points', 
                 fontsize=9, ha='left', va='bottom', fontweight='bold',
-                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8, edgecolor='gray'))
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8, edgecolor=colors['annotations']['text_box_edge']))
 
 for _, row in all_data.iterrows():
     if row.name not in pareto_indices:
@@ -291,23 +285,22 @@ for _, row in all_data.iterrows():
             ax6.annotate(label, (row['cost_cents'], row['accuracy']), 
                         xytext=(5, 5), textcoords='offset points', 
                     fontsize=8, ha='left', va='bottom', alpha=0.7,
-                    bbox=dict(boxstyle='round,pad=0.2', facecolor='lightgray', alpha=0.6))
+                    bbox=dict(boxstyle='round,pad=0.2', facecolor=colors['annotations']['text_box_face'], alpha=0.6))
 
 legend_elements = []
-legend_elements.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', markersize=8, label='Web+Vector'))
-legend_elements.append(plt.Line2D([0], [0], marker='s', color='w', markerfacecolor='gray', markersize=8, label='Vector Only'))
-legend_elements.append(plt.Line2D([0], [0], marker='^', color='w', markerfacecolor='gray', markersize=8, label='Web Only'))
-legend_elements.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=history_colors['individual'], markersize=8, label='Individual History'))
-legend_elements.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=history_colors['shared'], markersize=8, label='Shared History'))
+legend_elements.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=colors['legend']['neutral_marker'], markersize=8, label='Web+Vector'))
+legend_elements.append(plt.Line2D([0], [0], marker='s', color='w', markerfacecolor=colors['legend']['neutral_marker'], markersize=8, label='Vector Only'))
+legend_elements.append(plt.Line2D([0], [0], marker='^', color='w', markerfacecolor=colors['legend']['neutral_marker'], markersize=8, label='Web Only'))
+legend_elements.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=colors['history']['individual'], markersize=8, label='Individual History'))
+legend_elements.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=colors['history']['shared'], markersize=8, label='Shared History'))
 
-ax6.set_xlabel('Cost (¢)', fontweight='bold', fontsize=11)
-ax6.set_ylabel('Accuracy (%)', fontweight='bold', fontsize=11)
-ax6.tick_params(axis='both', labelsize=10)
+ax6.set_xlabel('Cost (¢)', fontweight='bold', fontsize=11, color='black')
+ax6.set_ylabel('Accuracy (%)', fontweight='bold', fontsize=11, color='black')
+ax6.tick_params(axis='both', labelsize=10, colors='black')
 ax6.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
 apply_standard_plot_formatting(ax6, 'd', background_color=background_colors['white'])
-ax6.set_title('Cost-Accuracy Pareto Analysis', fontsize=12, fontweight='bold', pad=35)
 
-ax6.legend(handles=legend_elements, loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=5, fontsize=9, frameon=True, fancybox=True, shadow=True)
+ax6.legend(handles=legend_elements, loc='upper center', bbox_to_anchor=(0.5, 1.2), ncol=3, fontsize=9, frameon=True, fancybox=True, shadow=True)
 
 plt.tight_layout()
 plt.savefig('search_ablation.pdf', dpi=300, bbox_inches='tight', facecolor='white')

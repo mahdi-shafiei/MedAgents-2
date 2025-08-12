@@ -19,7 +19,7 @@ echo ""
 EXPERIMENT_NAME="ebagents"
 
 declare -A configs
-configs["new"]="triage.forced_level=hard search.search_mode=vector"
+configs["new"]="triage.forced_level=hard triage.disable_triage=true search.search_mode=vector"
 
 for RUN_ID in "${RUN_IDS[@]}"; do
     for DATASET in "${DATASETS[@]}"; do 
