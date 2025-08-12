@@ -143,6 +143,15 @@ def get_color_scheme(figure_type='figure_2', theme='manchester_united_official')
                     'Role Play': colors['black'],
                     'Discussion': colors['jet']
                 },
+                'component_breakdown': {
+                    'Baseline': colors['penn_red'],
+                    'Multi-Agent': colors['engineering_orange'],
+                    'Evidence_Retrieval': colors['sunset'],
+                    'Iterative_Reasoning': colors['jasmine'],
+                    'Role_Play': colors['sandy_brown'],
+                    'Discussion_Orchestration': colors['persimmon'],
+                    'Final': colors['barn_red']
+                },
                 'annotations': {
                     'text_box_face': colors['snow'],
                     'text_box_edge': colors['gray'],

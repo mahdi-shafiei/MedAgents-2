@@ -132,105 +132,59 @@ ax2 = fig.add_subplot(gs[0, 1])
 rounds_data_search = summary_df[(summary_df['n_agents'] == 3) & (summary_df['has_search'] == True)]
 rounds_data_no_search = summary_df[(summary_df['n_agents'] == 3) & (summary_df['has_search'] == False)]
 
-rounds = sorted(set(list(rounds_data_search['n_rounds']) + list(rounds_data_no_search['n_rounds'])))
-x_pos = np.arange(len(rounds))
-width = 0.35
-
-search_accuracies = []
-search_stds = []
-no_search_accuracies = []
-no_search_stds = []
-search_times = []
-search_time_stds = []
-no_search_times = []
-no_search_time_stds = []
-
-for round_num in rounds:
-    search_data = rounds_data_search[rounds_data_search['n_rounds'] == round_num]
-    if not search_data.empty:
-        search_accuracies.append(search_data['accuracy_mean'].iloc[0])
-        search_stds.append(search_data['accuracy_std'].iloc[0])
-        search_times.append(search_data['time_mean'].iloc[0])
-        search_time_stds.append(search_data['time_std'].iloc[0])
-    else:
-        search_accuracies.append(0)
-        search_stds.append(0)
-        search_times.append(0)
-        search_time_stds.append(0)
+if not rounds_data_search.empty:
+    line = ax2.plot(rounds_data_search['n_rounds'], rounds_data_search['accuracy_mean'], 
+                   marker='o', linewidth=3, markersize=10,
+                   color=colors['metrics']['accuracy'], alpha=0.8,
+                   markeredgecolor='black', markeredgewidth=2, label='With search')
     
-    no_search_data = rounds_data_no_search[rounds_data_no_search['n_rounds'] == round_num]
-    if not no_search_data.empty:
-        no_search_accuracies.append(no_search_data['accuracy_mean'].iloc[0])
-        no_search_stds.append(no_search_data['accuracy_std'].iloc[0])
-        no_search_times.append(no_search_data['time_mean'].iloc[0])
-        no_search_time_stds.append(no_search_data['time_std'].iloc[0])
-    else:
-        no_search_accuracies.append(0)
-        no_search_stds.append(0)
-        no_search_times.append(0)
-        no_search_time_stds.append(0)
+    ax2.fill_between(rounds_data_search['n_rounds'], 
+                    rounds_data_search['accuracy_mean'] - rounds_data_search['accuracy_std'],
+                    rounds_data_search['accuracy_mean'] + rounds_data_search['accuracy_std'],
+                    color=colors['metrics']['accuracy'], alpha=0.2)
+    
+    for i, row in rounds_data_search.iterrows():
+        ax2.annotate(f'{row["accuracy_mean"]:.1f}%', 
+                    (row['n_rounds'], row['accuracy_mean']),
+                    textcoords="offset points", xytext=(0,15), ha='center',
+                    fontsize=12, fontweight='bold', color='black')
 
-bars1 = ax2.bar(x_pos - width/2, no_search_accuracies, width, 
-                color=colors['metrics']['time'], alpha=0.8, 
-                edgecolor='black', linewidth=1.5, label='No search')
+if not rounds_data_no_search.empty:
+    line = ax2.plot(rounds_data_no_search['n_rounds'], rounds_data_no_search['accuracy_mean'], 
+                   marker='s', linewidth=3, markersize=10,
+                   color=colors['metrics']['time'], alpha=0.8,
+                   markeredgecolor='black', markeredgewidth=2, label='No search')
+    
+    ax2.fill_between(rounds_data_no_search['n_rounds'], 
+                    rounds_data_no_search['accuracy_mean'] - rounds_data_no_search['accuracy_std'],
+                    rounds_data_no_search['accuracy_mean'] + rounds_data_no_search['accuracy_std'],
+                    color=colors['metrics']['time'], alpha=0.2)
+    
+    for i, row in rounds_data_no_search.iterrows():
+        ax2.annotate(f'{row["accuracy_mean"]:.1f}%', 
+                    (row['n_rounds'], row['accuracy_mean']),
+                    textcoords="offset points", xytext=(0,-20), ha='center',
+                    fontsize=12, fontweight='bold', color='black')
 
-bars2 = ax2.bar(x_pos + width/2, search_accuracies, width,
-                color=colors['metrics']['accuracy'], alpha=0.8, 
-                edgecolor='black', linewidth=1.5, label='With search')
+best_accuracy_idx = summary_df[(summary_df['n_agents'] == 3)]['accuracy_mean'].idxmax()
+best_point = summary_df.loc[best_accuracy_idx]
+best_x = best_point['n_rounds']
+best_y = best_point['accuracy_mean']
+ax2.plot(best_x, best_y, marker='*', markersize=15, color='gold', 
+         markeredgecolor='black', markeredgewidth=2, label='Best performing')
 
-ax2.errorbar(x_pos - width/2, no_search_accuracies, yerr=no_search_stds, 
-             fmt='none', color='black', alpha=0.5, capsize=3, capthick=2)
-ax2.errorbar(x_pos + width/2, search_accuracies, yerr=search_stds, 
-             fmt='none', color='black', alpha=0.5, capsize=3, capthick=2)
-
-for i, (bar, acc) in enumerate(zip(bars1, no_search_accuracies)):
-    if acc > 0:
-        ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.5,
-                 f'{acc:.1f}%', ha='center', va='bottom', fontsize=12, fontweight='bold')
-
-for i, (bar, acc) in enumerate(zip(bars2, search_accuracies)):
-    if acc > 0:
-        ax2.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.5,
-                 f'{acc:.1f}%', ha='center', va='bottom', fontsize=12, fontweight='bold')
+ax2.axhline(y=best_y, color='gold', linestyle='--', alpha=0.7, linewidth=2)
 
 ax2.set_xlabel('Number of rounds', fontweight='bold', fontsize=16)
 ax2.set_ylabel('Accuracy (%)', fontweight='bold', fontsize=16)
 ax2.tick_params(axis='both', labelsize=14)
-ax2.grid(True, alpha=0.3, axis='y', linewidth=0.5)
+ax2.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
 ax2.legend(fontsize=12, loc='upper left', frameon=True, fancybox=True, shadow=True, 
            framealpha=1.0, facecolor='white', edgecolor='black')
 apply_standard_plot_formatting(ax2, 'b', background_color=background_colors['white'], fontsize=20)
 ax2.set_ylim(20, 45)
-ax2.set_xticks(x_pos)
-ax2.set_xticklabels(rounds)
-
-ax2_time = ax2.twinx()
-
-time_line1 = ax2_time.plot(x_pos, [t for t in no_search_times if t > 0], 
-                          marker='s', linewidth=2, markersize=8,
-                          color=colors['metrics']['time'], alpha=0.6,
-                          markeredgecolor='black', markeredgewidth=1, 
-                          linestyle='--', label='No search (time)')
-
-time_line2 = ax2_time.plot(x_pos, [t for t in search_times if t > 0], 
-                          marker='o', linewidth=2, markersize=8,
-                          color=colors['metrics']['accuracy'], alpha=0.6,
-                          markeredgecolor='black', markeredgewidth=1, 
-                          linestyle='--', label='With search (time)')
-
-ax2_time.errorbar(x_pos, [t for t in no_search_times if t > 0], 
-                 yerr=[std for std in no_search_time_stds if std > 0], 
-                 fmt='none', color=colors['metrics']['time'], alpha=0.6, 
-                 capsize=3, capthick=1)
-ax2_time.errorbar(x_pos, [t for t in search_times if t > 0], 
-                 yerr=[std for std in search_time_stds if std > 0], 
-                 fmt='none', color=colors['metrics']['accuracy'], alpha=0.6, 
-                 capsize=3, capthick=1)
-
-ax2_time.set_ylabel('Average Time (s)', fontweight='bold', fontsize=16, color='black')
-ax2_time.tick_params(axis='y', labelcolor='black', labelsize=13)
-ax2_time.legend(fontsize=12, loc='upper right', frameon=True, fancybox=True, shadow=True, 
-                framealpha=1.0, facecolor='white', edgecolor='black')
+ax2.set_xticks([1, 2, 3])
+ax2.set_xticklabels([1, 2, 3])
 
 ax3 = fig.add_subplot(gs[0, 2])
 
@@ -240,21 +194,15 @@ x_pos = np.arange(len(role_play_conditions))
 
 role_play_accuracies = []
 role_play_stds = []
-role_play_times = []
-role_play_time_stds = []
 
 for condition in role_play_conditions:
     condition_data = role_play_summary[role_play_summary['exp_name'] == condition]
     if not condition_data.empty:
         role_play_accuracies.append(condition_data['accuracy_mean'].iloc[0])
         role_play_stds.append(condition_data['accuracy_std'].iloc[0])
-        role_play_times.append(condition_data['time_mean'].iloc[0])
-        role_play_time_stds.append(condition_data['time_std'].iloc[0])
     else:
         role_play_accuracies.append(0)
         role_play_stds.append(0)
-        role_play_times.append(0)
-        role_play_time_stds.append(0)
 
 bars = ax3.bar(x_pos, role_play_accuracies, 
             color=[colors['role_play']['enable_role_play'], colors['role_play']['disable_role_play']], 
@@ -276,152 +224,137 @@ ax3.set_ylim(20, 45)
 ax3.set_xticks(x_pos)
 ax3.set_xticklabels(role_play_labels)
 
-ax3_time = ax3.twinx()
-
-time_line = ax3_time.plot(x_pos, role_play_times, 
-                         marker='o', linewidth=2.5, markersize=8,
-                         color=colors['metrics']['time'], alpha=0.7,
-                         markeredgecolor='black', markeredgewidth=1.5, 
-                         linestyle='--', label='Processing Time')
-
-ax3_time.errorbar(x_pos, role_play_times, yerr=role_play_time_stds, 
-                 fmt='none', color=colors['metrics']['time'], alpha=0.7, 
-                 capsize=3, capthick=2)
-
-ax3_time.set_ylabel('Processing Time (s)', fontweight='bold', fontsize=16, color='black')
-ax3_time.tick_params(axis='y', labelcolor='black', labelsize=13)
-ax3_time.legend(fontsize=12, loc='upper right', frameon=True, fancybox=True, shadow=True, 
-                framealpha=1.0, facecolor='white', edgecolor='black')
-
-time_reduction = ((role_play_times[0] - role_play_times[1]) / role_play_times[0] * 100) if len(role_play_times) > 1 and role_play_times[0] > 0 else 0
-if time_reduction > 0:
-    ax3.text(0.98, 0.02, f'Time Reduction: {time_reduction:.1f}%', 
-             transform=ax3.transAxes, fontsize=12, fontweight='bold',
-             verticalalignment='bottom', horizontalalignment='right',
-             bbox=dict(boxstyle='round,pad=0.3', facecolor=colors['metrics']['time'], 
-                      alpha=0.8, edgecolor='white'))
-
 ax4 = fig.add_subplot(gs[1, 0])
 
 baseline_accuracy = summary_df[(summary_df['n_agents'] == 1) & 
                               (summary_df['n_rounds'] == 1) & 
                               (summary_df['has_search'] == False)]['accuracy_mean'].iloc[0]
-baseline_cost = summary_df[(summary_df['n_agents'] == 1) & 
-                          (summary_df['n_rounds'] == 1) & 
-                          (summary_df['has_search'] == False)]['cost_mean'].iloc[0]
 
-improvements = []
-improvement_labels = []
-improvement_colors = []
-improvement_descriptions = []
+components = ['Baseline', 'Multi-Agent', 'Evidence\nRetrieval', 'Iterative\nReasoning', 'Role Play', 'Discussion\nOrchestration', 'Final']
+values = [baseline_accuracy]
+cumulative = [baseline_accuracy]
 
 add_agents_data = summary_df[(summary_df['n_agents'] == 3) & 
                             (summary_df['n_rounds'] == 1) & 
                             (summary_df['has_search'] == False)]
 if not add_agents_data.empty:
-    agents_accuracy = add_agents_data['accuracy_mean'].iloc[0]
-    agents_cost = add_agents_data['cost_mean'].iloc[0]
-    agents_improvement = ((agents_accuracy - baseline_accuracy) / (agents_cost - baseline_cost)) if agents_cost != baseline_cost else 0
-    improvements.append(agents_improvement)
-    improvement_labels.append('Multi-Agent')
-    improvement_colors.append(colors['improvements']['Multi-Agent'])
-    improvement_descriptions.append('Multi-Agent')
+    agents_improvement = add_agents_data['accuracy_mean'].iloc[0] - baseline_accuracy
+    values.append(agents_improvement)
+    cumulative.append(cumulative[-1] + agents_improvement)
+else:
+    values.append(0)
+    cumulative.append(cumulative[-1])
 
-add_rounds_data = summary_df[(summary_df['n_agents'] == 1) & 
-                            (summary_df['n_rounds'] == 3) & 
-                            (summary_df['has_search'] == True)]
-if not add_rounds_data.empty:
-    rounds_accuracy = add_rounds_data['accuracy_mean'].iloc[0]
-    rounds_cost = add_rounds_data['cost_mean'].iloc[0]
-    rounds_improvement = ((rounds_accuracy - baseline_accuracy) / (rounds_cost - baseline_cost)) if rounds_cost != baseline_cost else 0
-    improvements.append(rounds_improvement)
-    improvement_labels.append('Iterative')
-    improvement_colors.append(colors['improvements']['Iterative'])
-    improvement_descriptions.append('Iterative')
-
-add_search_data = summary_df[(summary_df['n_agents'] == 1) & 
+add_search_data = summary_df[(summary_df['n_agents'] == 3) & 
                             (summary_df['n_rounds'] == 1) & 
                             (summary_df['has_search'] == True)]
 if not add_search_data.empty:
-    search_accuracy = add_search_data['accuracy_mean'].iloc[0]
-    search_cost = add_search_data['cost_mean'].iloc[0]
-    search_improvement = ((search_accuracy - baseline_accuracy) / (search_cost - baseline_cost)) if search_cost != baseline_cost else 0
-    improvements.append(search_improvement)
-    improvement_labels.append('Evidence')
-    improvement_colors.append(colors['improvements']['Evidence'])
-    improvement_descriptions.append('Evidence')
+    search_improvement = add_search_data['accuracy_mean'].iloc[0] - cumulative[-1]
+    values.append(search_improvement)
+    cumulative.append(cumulative[-1] + search_improvement)
+else:
+    values.append(0)
+    cumulative.append(cumulative[-1])
 
-disable_role_play_data = role_play_summary[role_play_summary['exp_name'] == 'disable_role_play']
+add_rounds_data = summary_df[(summary_df['n_agents'] == 3) & 
+                            (summary_df['n_rounds'] == 3) & 
+                            (summary_df['has_search'] == True)]
+if not add_rounds_data.empty:
+    rounds_improvement = add_rounds_data['accuracy_mean'].iloc[0] - cumulative[-1]
+    values.append(rounds_improvement)
+    cumulative.append(cumulative[-1] + rounds_improvement)
+else:
+    values.append(0)
+    cumulative.append(cumulative[-1])
+
 enable_role_play_data = role_play_summary[role_play_summary['exp_name'] == 'enable_role_play']
+disable_role_play_data = role_play_summary[role_play_summary['exp_name'] == 'disable_role_play']
+if not enable_role_play_data.empty and not disable_role_play_data.empty:
+    role_play_improvement = enable_role_play_data['accuracy_mean'].iloc[0] - disable_role_play_data['accuracy_mean'].iloc[0]
+    values.append(role_play_improvement)
+    cumulative.append(cumulative[-1] + role_play_improvement)
+else:
+    values.append(0)
+    cumulative.append(cumulative[-1])
 
-if not disable_role_play_data.empty and not enable_role_play_data.empty:
-    disable_accuracy = disable_role_play_data['accuracy_mean'].iloc[0]
-    disable_cost = disable_role_play_data['cost_mean'].iloc[0]
-    enable_accuracy = enable_role_play_data['accuracy_mean'].iloc[0]
-    enable_cost = enable_role_play_data['cost_mean'].iloc[0]
-
-    role_play_improvement = ((enable_accuracy - disable_accuracy) / (enable_cost - disable_cost)) if enable_cost != disable_cost else 0
-    improvements.append(role_play_improvement)
-    improvement_labels.append('Role Play')
-    improvement_colors.append(colors['improvements']['Role Play'])
-    improvement_descriptions.append('Role Play')
-
-orchestration_baseline_data = orchestration_summary[orchestration_summary['exp_name'] == 'independent']
 orchestration_best_data = orchestration_summary[orchestration_summary['exp_name'] == 'group_chat_with_orchestrator']
+orchestration_worst_data = orchestration_summary[orchestration_summary['exp_name'] == 'independent']
+if not orchestration_best_data.empty and not orchestration_worst_data.empty:
+    orchestration_improvement = orchestration_best_data['accuracy_mean'].iloc[0] - orchestration_worst_data['accuracy_mean'].iloc[0]
+    values.append(orchestration_improvement)
+    cumulative.append(cumulative[-1] + orchestration_improvement)
+else:
+    values.append(0)
+    cumulative.append(cumulative[-1])
 
-if not orchestration_baseline_data.empty and not orchestration_best_data.empty:
-    orchestration_baseline_accuracy = orchestration_baseline_data['accuracy_mean'].iloc[0]
-    orchestration_baseline_cost = orchestration_baseline_data['cost_mean'].iloc[0]
-    orchestration_best_accuracy = orchestration_best_data['accuracy_mean'].iloc[0]
-    orchestration_best_cost = orchestration_best_data['cost_mean'].iloc[0]
+values.append(cumulative[-1])
 
-    orchestration_improvement = ((orchestration_best_accuracy - orchestration_baseline_accuracy) / 
-                               (orchestration_best_cost - orchestration_baseline_cost)) if orchestration_best_cost != orchestration_baseline_cost else 0
-    improvements.append(orchestration_improvement)
-    improvement_labels.append('Discussion')
-    improvement_colors.append(colors['improvements']['Discussion'])
-    improvement_descriptions.append('Discussion')
+x_pos = np.arange(len(components))
+component_colors = colors['component_breakdown']
+bar_colors = [component_colors['Baseline'] if i == 0 
+              else component_colors['Multi-Agent'] if i == 1
+              else component_colors['Evidence_Retrieval'] if i == 2
+              else component_colors['Iterative_Reasoning'] if i == 3
+              else component_colors['Role_Play'] if i == 4
+              else component_colors['Discussion_Orchestration'] if i == 5
+              else component_colors['Final'] for i in range(len(components))]
 
-bars = ax4.bar(range(len(improvements)), improvements, color=improvement_colors, 
-               alpha=0.8, edgecolor='black', linewidth=2)
+bars = []
+for i, (component, value) in enumerate(zip(components, values)):
+    if i == 0 or i == len(components) - 1:
+        bar = ax4.bar(i, value, bottom=0, color=bar_colors[i], alpha=0.8, 
+                     edgecolor='black', linewidth=1.5, width=0.7)
+        bars.append(bar)
+    else:
+        bottom = cumulative[i-1] if value > 0 else cumulative[i]
+        height = abs(value)
+        bar = ax4.bar(i, height, bottom=bottom, color=bar_colors[i], alpha=0.8,
+                     edgecolor='black', linewidth=1.5, width=0.7)
+        bars.append(bar)
 
-for i, (bar, improvement) in enumerate(zip(bars, improvements)):
-    height = bar.get_height()
-    y_pos = height + (abs(height) * 0.05 if height != 0 else 0.1)
+for i in range(1, len(cumulative)):
+    if i < len(cumulative) - 1:
+        ax4.plot([i-0.35, i+0.35], [cumulative[i-1], cumulative[i-1]], 
+                'k--', alpha=0.6, linewidth=1.2)
+
+for i, (bar_group, value, cum_val) in enumerate(zip(bars, values, cumulative)):
+    if isinstance(bar_group, list):
+        bar = bar_group[0]
+    else:
+        bar = bar_group[0]
+    
+    if i == 0 or i == len(components) - 1:
+        y_pos = bar.get_height() + 0.8
+        text_val = cum_val
+    else:
+        y_pos = bar.get_y() + bar.get_height() + 0.8
+        text_val = value
+    
     ax4.text(bar.get_x() + bar.get_width()/2., y_pos,
-             f'{improvement:.1f}', ha='center', 
-             va='bottom' if height >= 0 else 'top', 
-             fontsize=14, fontweight='bold', color='black')
+             f'{text_val:.1f}%' if i == 0 or i == len(components)-1 else f'+{text_val:.1f}%' if text_val > 0 else f'{text_val:.1f}%',
+             ha='center', va='bottom', fontsize=11, fontweight='bold')
 
-ax4.axhline(y=0, color='black', linestyle='-', linewidth=1.5, alpha=0.8)
+total_improvement = cumulative[-1] - cumulative[0]
+ax4.text(0.02, 0.98, f'Total Improvement: +{total_improvement:.1f}%', 
+         transform=ax4.transAxes, fontsize=13, fontweight='bold',
+         verticalalignment='top', horizontalalignment='left',
+         bbox=dict(boxstyle='round,pad=0.4', facecolor='white', 
+                  alpha=0.9, edgecolor='black', linewidth=1))
 
-best_idx = improvements.index(max(improvements)) if improvements else 0
-if improvements:
-    ax4.plot(best_idx, improvements[best_idx], marker='*', markersize=15, 
-             color='gold', markeredgecolor='black', markeredgewidth=2, 
-             zorder=10, label='Most effective')
-
-ax4.set_xlabel('Enhancement Strategy', fontweight='bold', fontsize=16)
-ax4.set_ylabel('Cost-Effectiveness\n(Δ Accuracy % / Δ Cost ¢)', fontweight='bold', fontsize=16)
-ax4.tick_params(axis='both', labelsize=14)
-ax4.grid(True, alpha=0.2, axis='y', linewidth=0.8, linestyle='-')
+ax4.set_xlabel('System Components', fontweight='bold', fontsize=16)
+ax4.set_ylabel('Accuracy (%)', fontweight='bold', fontsize=16)
+ax4.tick_params(axis='both', labelsize=12)
+ax4.grid(True, alpha=0.3, axis='y', linewidth=0.5, linestyle='-')
 apply_standard_plot_formatting(ax4, 'd', background_color=background_colors['white'], fontsize=20)
 
-if improvements:
-    y_min = min(improvements)
-    y_max = max(improvements)
-    y_range = y_max - y_min
-    padding = y_range * 0.2
-    ax4.set_ylim(y_min - padding, y_max + padding)
-else:
-    ax4.set_ylim(-1, 1)
+ax4.set_ylim(20, max(cumulative) + 5)
 
-ax4.set_xlim(-0.6, len(improvements) - 0.4)
-ax4.set_xticks(range(len(improvements)))
-ax4.set_xticklabels(improvement_labels, fontsize=13, ha='center')
-ax4.legend(loc='upper left', fontsize=12, 
-           frameon=True, fancybox=True, shadow=True, framealpha=1.0, 
-           facecolor='white', edgecolor='black')
+ax4.set_xlim(-0.5, len(values) - 0.5)
+ax4.set_xticks(range(len(values)))
+ax4.set_xticklabels(components, fontsize=11, ha='center', rotation=0)
+
+for spine in ax4.spines.values():
+    spine.set_linewidth(1.2)
 
 ax5 = fig.add_subplot(gs[1, 1])
 
