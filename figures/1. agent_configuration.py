@@ -343,7 +343,7 @@ ax4.text(0.02, 0.98, f'Total Improvement: +{total_improvement:.1f}%',
 
 ax4.set_xlabel('System Components', fontweight='bold', fontsize=16)
 ax4.set_ylabel('Accuracy (%)', fontweight='bold', fontsize=16)
-ax4.tick_params(axis='both', labelsize=12)
+ax4.tick_params(axis='both', labelsize=14)
 ax4.grid(True, alpha=0.3, axis='y', linewidth=0.5, linestyle='-')
 apply_standard_plot_formatting(ax4, 'd', background_color=background_colors['white'], fontsize=20)
 
@@ -351,7 +351,7 @@ ax4.set_ylim(20, max(cumulative) + 5)
 
 ax4.set_xlim(-0.5, len(values) - 0.5)
 ax4.set_xticks(range(len(values)))
-ax4.set_xticklabels(components, fontsize=11, ha='center', rotation=0)
+ax4.set_xticklabels(components, fontsize=14, ha='center', rotation=0)
 
 for spine in ax4.spines.values():
     spine.set_linewidth(1.2)
