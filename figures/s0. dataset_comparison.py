@@ -30,7 +30,7 @@ dataset_mapping = {
 }
 
 models = ['gpt-4o', 'gpt-4o-mini', 'o3-mini']
-methods = ['CoT', 'CoT-SC', 'MedPrompt', 'MultiPersona', 'MedAgents', 'AFlow', 'EBAgents', 'Few-shot', 'MDAgents', 'SPO', 'Self-refine', 'MedRAG', 'Zero-shot']
+methods = ['CoT', 'CoT-SC', 'MedPrompt', 'MultiPersona', 'MedAgents', 'AFlow', 'MedAgents-2', 'Few-shot', 'MDAgents', 'SPO', 'Self-refine', 'MedRAG', 'Zero-shot']
 df['dataset'] = df['dataset'].map(dataset_mapping)
 datasets = list(df['dataset'].unique())
 
@@ -88,7 +88,7 @@ for row_idx, dataset in enumerate(datasets):
             ax.spines['bottom'].set_linewidth(1.5)
 
 plt.tight_layout()
-plt.savefig('performance_comparison.pdf', dpi=300, bbox_inches='tight', facecolor='white')
+plt.savefig('fig-s1.performance_comparison.pdf', dpi=300, bbox_inches='tight', facecolor='white')
 plt.show()
 
 fig2 = plt.figure(figsize=(36, 48))
@@ -160,5 +160,5 @@ for row_idx, dataset in enumerate(datasets):
             ax.spines['bottom'].set_linewidth(1.5)
 
 plt.tight_layout()
-plt.savefig('pareto_analysis.pdf', dpi=300, bbox_inches='tight', facecolor='white')
+plt.savefig('fig-s2.pareto_analysis.pdf', dpi=300, bbox_inches='tight', facecolor='white')
 plt.show()

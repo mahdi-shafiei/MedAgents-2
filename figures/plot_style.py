@@ -82,7 +82,7 @@ def get_color_scheme(figure_type='figure_2', theme='manchester_united_official')
             'figure_0': {
                 'palette': colors,
                 'methods': {
-                    'EBAgents': colors['jasmine'],
+                    'MedAgents-2': colors['jasmine'],
                     'AFlow': colors['sandy_brown_light'],
                     'SPO': colors['sunset'],
                     'MultiPersona': colors['sandy_brown'],
