@@ -122,8 +122,8 @@ def plot_expert_specialty_distribution(ax, expert_profiles_df, colors, panel_lab
         'medexqa': 'MedExQA',
         'medmcqa': 'MedMCQA',
         'medqa': 'MedQA',
-        'medxpertqa-r': 'MedXpertQA-R',
-        'medxpertqa-u': 'MedXpertQA-U',
+        'medxpertqa-r': 'MedXpert-R',
+        'medxpertqa-u': 'MedXpert-U',
         'mmlu': 'MMLU-Med',
         'mmlu-pro': 'MMLU-Pro-Med',
         'pubmedqa': 'PubMedQA',
@@ -211,7 +211,6 @@ def plot_expert_specialty_distribution(ax, expert_profiles_df, colors, panel_lab
     ax.set_xticklabels([dataset_mapping.get(dataset, dataset.title()) for dataset in datasets], 
                        fontsize=13, rotation=45, ha='right')
     ax.set_ylabel('Percentage of Experts (%)', fontweight='bold', fontsize=16, color='black')
-    ax.set_xlabel('Medical Datasets', fontweight='bold', fontsize=16, color='black')
     ax.tick_params(axis='both', labelsize=13, colors='black')
     ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
     

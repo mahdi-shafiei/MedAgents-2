@@ -23,22 +23,22 @@ def get_manchester_colors():
 def get_nature_biotechnology_colors():
     """Get Nature Biotechnology journal color palette"""
     return {
-        "nature_red": "#E31A1C",          # Nature signature red
-        "nature_blue": "#1F78B4",         # Nature blue
-        "nature_green": "#33A02C",        # Nature green
-        "nature_orange": "#FF7F00",       # Nature orange
-        "nature_purple": "#6A3D9A",       # Nature purple
-        "nature_yellow": "#FFFF99",       # Nature yellow
-        "nature_brown": "#B15928",        # Nature brown
-        "nature_pink": "#FB9A99",         # Nature pink
-        "nature_light_blue": "#A6CEE3",   # Nature light blue
-        "nature_light_green": "#B2DF8A",  # Nature light green
-        "nature_light_orange": "#FDBF6F", # Nature light orange
-        "nature_light_purple": "#CAB2D6", # Nature light purple
-        "nature_grey": "#999999",         # Nature grey
-        "nature_dark_red": "#B2182B",     # Nature dark red
-        "nature_dark_blue": "#2166AC",    # Nature dark blue
-        "nature_teal": "#35978F"          # Nature teal
+        "nature_red": "#E31A1C",          
+        "nature_blue": "#1F78B4",         
+        "nature_green": "#33A02C",        
+        "nature_orange": "#FF7F00",       
+        "nature_purple": "#6A3D9A",       
+        "nature_yellow": "#FFFF99",       
+        "nature_brown": "#B15928",        
+        "nature_pink": "#FB9A99",         
+        "nature_light_blue": "#A6CEE3",   
+        "nature_light_green": "#B2DF8A",  
+        "nature_light_orange": "#FDBF6F", 
+        "nature_light_purple": "#CAB2D6", 
+        "nature_grey": "#999999",         
+        "nature_dark_red": "#B2182B",     
+        "nature_dark_blue": "#2166AC",    
+        "nature_teal": "#35978F"          
     }
 
 def get_figure_0_colors():
@@ -80,6 +80,13 @@ def get_figure_1_colors():
         'no_search': manchester_colors['jet'],
         'with_search': manchester_colors['penn_red'],
         'rounds': {1: manchester_colors['penn_red'], 2: manchester_colors['sandy_brown'], 3: manchester_colors['jasmine']},
+        'agents': {
+            'moderator': manchester_colors['penn_red'],
+            'triage': manchester_colors['gray'],
+            'expert1': manchester_colors['sunset'],
+            'expert2': manchester_colors['jasmine'],
+            'expert3': manchester_colors['sandy_brown']
+        },
         'architecture': {
             'agent': manchester_colors['black'],
             'search': manchester_colors['sandy_brown'],
@@ -96,10 +103,10 @@ def get_figure_1_colors():
             'disable_role_play': manchester_colors['gray']
         },
         'orchestration': {
-            'group_chat_with_orchestrator': nature_biotech_colors['nature_red'],          # Nature signature red
-            'group_chat_voting_only': nature_biotech_colors['nature_blue'],               # Nature blue
-            'independent': nature_biotech_colors['nature_green'],                         # Nature green  
-            'one_on_one_sync': nature_biotech_colors['nature_purple']                     # Nature purple
+            'group_chat_with_orchestrator': nature_biotech_colors['nature_red'],          
+            'group_chat_voting_only': nature_biotech_colors['nature_blue'],               
+            'independent': nature_biotech_colors['nature_green'],                         
+            'one_on_one_sync': nature_biotech_colors['nature_purple']                     
         },
         'component_breakdown': {
             'Baseline': manchester_colors['gray'],
@@ -152,7 +159,6 @@ def apply_medagents_style():
     try:
         plt.style.use('/home/ubuntu/MedAgents-2/figures/medagents.mplstyle')
     except:
-        # Fallback to basic style if mplstyle not available
         plt.rcParams.update({
             'font.size': 8.5,
             'font.family': 'sans-serif',
