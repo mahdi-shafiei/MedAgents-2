@@ -41,7 +41,7 @@ def discover_logs_files(output_base):
     logs_files = []
     
     for root, dirs, files in os.walk(output_base):
-        if 'ebagents' not in root:
+        if 'medagents' not in root:
             continue
         if 'logs.json' in files:
             logs_files.append(os.path.join(root, 'logs.json'))

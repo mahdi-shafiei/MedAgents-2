@@ -14,7 +14,7 @@ DATASETS=("medqa" "medbullets" "medexqa" "medmcqa" "medxpertqa-r" "medxpertqa-u"
 RUN_IDS=(0 1 2)
 SPLIT="test_hard"
 MODEL="gpt-4o-mini"
-EXPERIMENT_NAME="baseline"
+EXPERIMENT_NAME="medagents"
 
 # Loop over all datasets and run IDs
 for RUN_ID in "${RUN_IDS[@]}"; do
@@ -33,7 +33,7 @@ for RUN_ID in "${RUN_IDS[@]}"; do
             execution.dataset.split=$SPLIT \
             execution.model.name=$MODEL \
             execution.experiments.run_id=$RUN_ID \
-            execution.experiment_name=ebagents/$EXPERIMENT_NAME \
+            execution.experiment_name=medagents/$EXPERIMENT_NAME \
 
         echo "Completed experiment for $DATASET (run $RUN_ID)"
         echo "Results saved in: output/$DATASET/$EXPERIMENT_NAME/run_$RUN_ID/$MODEL/"

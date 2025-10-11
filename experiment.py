@@ -7,7 +7,7 @@ import json
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from dataclasses import dataclass
-from ebagents import MedAgentsLog
+from medagents import MedAgentsLog
 
 @dataclass
 class ExperimentResult:

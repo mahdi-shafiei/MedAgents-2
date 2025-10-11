@@ -12,7 +12,7 @@ from pathlib import Path
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from dotenv import load_dotenv
-from ebagents import EBMedAgents
+from medagents import MedAgents
 from agents import set_default_openai_client, set_tracing_disabled
 from openai import AsyncOpenAI
 from experiment import ExperimentResult, ExperimentSaver
@@ -43,7 +43,7 @@ async def process_query(problem: Dict[str, Any], cfg: DictConfig, process_idx: i
     """Process a single query using the new agent implementation."""
     start_time = datetime.now()
     setup_openai_client()
-    orchestrator = EBMedAgents(cfg)
+    orchestrator = MedAgents(cfg)
     difficulty = None if not cfg.triage.disable_triage else cfg.triage.forced_level
     medagents_log = await orchestrator.run(problem['question'], problem['options'], difficulty)
     return ExperimentResult.from_medagents_log(

@@ -2,6 +2,7 @@
 *.npy
 *.json
 *.csv
+*.txt
 
 # Generated figures
 figures/*.png

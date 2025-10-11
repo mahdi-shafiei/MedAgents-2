@@ -19,7 +19,7 @@ from omegaconf import DictConfig, OmegaConf
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
-from ebagents import EBMedAgents
+from medagents import MedAgents
 from agents import set_default_openai_client, set_tracing_disabled
 
 # Load environment variables
@@ -67,7 +67,7 @@ async def run_single_experiment(
     setup_openai_client()
     
     # Create orchestrator
-    orchestrator = EBMedAgents(cfg)
+    orchestrator = MedAgents(cfg)
     
     # Run the experiment
     result = await orchestrator.run(question, options, difficulty)

@@ -16,7 +16,7 @@ echo "Model: $MODEL"
 echo ""
 
 ## Group 1: Triage vs. No Triage
-EXPERIMENT_NAME="ebagents"
+EXPERIMENT_NAME="medagents"
 
 declare -A configs
 configs["new"]="triage.forced_level=hard triage.disable_triage=true search.search_mode=vector"

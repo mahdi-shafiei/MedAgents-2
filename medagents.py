@@ -135,7 +135,7 @@ class MedAgentsLog:
             } if self.total_usage else None
         }
 
-class EBMedAgents:
+class MedAgents:
     def __init__(self, cfg: DictConfig):
         self.cfg = cfg
         self.log = MedAgentsLog()
@@ -402,7 +402,7 @@ def main(cfg: DictConfig):
         "C": "Report the physician to the ethics committee",
         "D": "Refuse to dictate the operative report"
     }
-    orchestrator = EBMedAgents(cfg)
+    orchestrator = MedAgents(cfg)
     result = asyncio.run(orchestrator.run(question, options))
     
     print("\n=== TOKEN USAGE SUMMARY ===")
